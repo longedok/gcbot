@@ -227,6 +227,7 @@ class Bot:
         "gcoff",
         "status",
         "ping",
+        "github",
     ]
     DEFAULT_TTL = 86400
 
@@ -330,6 +331,9 @@ class Bot:
 
     def process_ping(self, command: Command) -> None:
         self.client.post_message(command.chat_id, f"Pong")
+
+    def process_github(self, command: Command) -> None:
+        self.client.post_message(command.chat_id, f"https://github.com/longedok/gcbot")
 
 
 def main() -> None:
