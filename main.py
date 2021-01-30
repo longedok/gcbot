@@ -246,7 +246,6 @@ class Bot:
 
             for update in updates:
                 logger.debug("Got new update: %s", update)
-
                 if "message" in update:
                     self.dispatch_message(update["message"])
 
@@ -310,7 +309,7 @@ class Bot:
 
         self.client.post_message(
             command.chat_id,
-            f"Garbadge collector enabled - automatically removing all new messages "
+            f"Garbage collector enabled - automatically removing all new messages "
             f"after {ttl} seconds."
         )
 
@@ -320,7 +319,7 @@ class Bot:
 
         self.client.post_message(
             command.chat_id,
-            "Garbadge collector disabled - "
+            "Garbage collector disabled - "
             "new messages won't be removed automatically"
         )
 
