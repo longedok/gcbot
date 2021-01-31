@@ -320,7 +320,7 @@ class Bot:
         self.client.post_message(
             command.chat_id,
             "Garbage collector disabled - "
-            "new messages won't be removed automatically"
+            "new messages won't be removed automatically."
         )
 
     def process_status(self, command: Command) -> None:

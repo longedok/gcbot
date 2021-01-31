@@ -4,8 +4,8 @@ from sqlalchemy import create_engine, Integer, Column, DateTime, Boolean
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
-ROOT_DIR = os.path.dirname(os.path.realpath(__file__))
-DB_PATH = os.path.join(ROOT_DIR, "bot.db")
+DATA_DIR = os.environ.get("DATADIR", os.path.dirname(os.path.realpath(__file__))) 
+DB_PATH = os.path.join(DATA_DIR, "bot.db")
 
 engine = create_engine(f"sqlite:///{DB_PATH}")
 
