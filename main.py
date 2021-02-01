@@ -11,7 +11,7 @@ from typing import Any
 from threading import Thread
 from dataclasses import dataclass
 
-from db import init_storage, Message, Settings, session, Session
+from db import init_storage, Session, session, MessageRecord, Settings
 
 TOKEN = os.environ["TOKEN"]
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
@@ -25,11 +25,24 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 
-class UpdatesPoller:
+class Client:
     POLL_INTERVAL = 300
 
     def __init__(self, last_update_id: int | None = None) -> None:
         self.last_update_id = last_update_id
+
+    def _post(self, url: str, data: dict) -> None:
+        headers = {
+            "Content-Type": "application/json",
+        }
+        response = requests.post(url, json=data, headers=headers)
+
+        if response.status_code == 200:
+            logger.debug("Got response: %s", response.text)
+        else:
+            logger.error(
+                "Got non-200 response: %s %s", response.status_code, response.text
+            )
 
     def _get(self, url: str, **params: Any) -> dict:
         headers = {
@@ -73,25 +86,11 @@ class UpdatesPoller:
 
         return updates
 
-
-class Client:
-    def _post(self, url: str, data: dict) -> None:
-        headers = {
-            "Content-Type": "application/json",
-        }
-        response = requests.post(url, json=data, headers=headers)
-
-        if response.status_code == 200:
-            logger.debug("Got response: %s", response.text)
-        else:
-            logger.error(
-                "Got non-200 response: %s %s", response.status_code, response.text
-            )
-
     def post_message(self, chat_id: int, text: str) -> None:
         body = {
             "chat_id": chat_id,
             "text": text,
+            "parse_mode": "HTML",
         }
 
         self._post(f"{BASE_URL}/sendMessage", body)
@@ -138,34 +137,37 @@ class GarbageCollector(Thread):
         session.add(settings)
         session.commit()
 
-    def add_message(self, message_data: dict) -> None:
+    def add_message(self, message: Message) -> None:
         if not self.enabled:
             return
 
-        message = Message(
-            message_id=message_data["message_id"],
-            chat_id=message_data["chat"]["id"],
-            delete_after=message_data["date"] + self.ttl,
+        record = MessageRecord(
+            message_id=message.message_id,
+            chat_id=message.chat_id,
+            delete_after=message.date + self.ttl,
         )
-        session.add(message)
+        session.add(record)
         session.commit()
 
     def collect_garbage(self) -> None:
         threshold = int(datetime.now().timestamp())
-        messages = (
+        records = (
             self.session
-            .query(Message)
-            .filter(Message.delete_after <= threshold, Message.deleted == False)
+            .query(MessageRecord)
+            .filter(
+                MessageRecord.delete_after <= threshold,
+                MessageRecord.deleted == False
+            )
         )
 
-        mids = [m.message_id for m in messages]
-        if mids:
-            logger.debug("Collected %s", mids)
+        record_ids = [r.message_id for r in records]
+        if record_ids:
+            logger.debug("Collected %s", record_ids)
 
-        for message in messages:
-            self.client.delete_message(message.chat_id, message.message_id)
-            message.deleted = True
-            self.session.add(message)
+        for record in records:
+            self.client.delete_message(record.chat_id, record.message_id)
+            record.deleted = True
+            self.session.add(record)
 
         self.session.commit()
 
@@ -177,8 +179,8 @@ class GarbageCollector(Thread):
 
     def count_pending(self) -> int:
         return (
-            session.query(Message)
-            .filter(Message.deleted == False)
+            session.query(MessageRecord)
+            .filter(MessageRecord.deleted == False)
             .count()
         )
 
@@ -196,50 +198,91 @@ class ValidationError(Exception):
 
 
 @dataclass
+class Message:
+    text: str | None
+    message_id: int
+    chat_id: int
+    date: int
+    entities: list[dict]
+
+    @classmethod
+    def from_json(cls, message_json: dict) -> Message:
+        text = message_json.get("text")
+        message_id = message_json["message_id"]
+        chat_id = message_json["chat"]["id"]
+        entities = message_json.get("entities", [])
+        date = message_json["date"]
+
+        return cls(text, message_id, chat_id, date, entities)
+
+    def get_command(self) -> Command | None:
+        commands = [e for e in self.entities if e["type"] == "bot_command"]
+        entity = next(iter(commands), None)
+
+        if not entity or not self.text:
+            return None
+
+        offset, length = entity["offset"], entity["length"]
+        command_str = self.text[offset + 1:offset + length].lower()
+        command_str, _, username = command_str.partition("@")
+
+        params_str = self.text[offset + length + 1:]
+        params = params_str.split() if params_str else []
+
+        return Command(command_str, params, username, offset, self)
+
+
+@dataclass
 class Command:
-    command: str
+    command_str: str
     params: list[str]
     username: str
-    message: dict
+    offset: int
+    message: Message
 
     @property
     def chat_id(self) -> int:
-        return self.message["chat"]["id"]
+        return self.message.chat_id
 
-    @classmethod
-    def from_message_and_entity(self, message: dict, entity: dict) -> Command:
-        text = message["text"]
-        offset, length = entity["offset"], entity["length"]
 
-        command = text[offset + 1:offset + length].lower()
-        command, _, username = command.partition("@")
+HELP = """
+This bot allows you to set an expiration time for all new messages in a group chat.
 
-        params_str = text[offset + length + 1:]
-        params = params_str.split() if params_str else []
+Supported commands:
 
-        return Command(command, params, username, message)
+/gc <i>ttl</i> - Enable automatic removal of messages after <i>ttl</i> seconds, e.g. <code>/gc 3600</code> to remove new messages after 1 hour. Default <i>ttl</i> is 86400 seconds (1 day).
+/gcoff - Disable automatic removal of messages.
+/status - Get current status.
+/github - Link to the bot's source code.
+/ping - Sends "pong" in response.
+/help - Display help message.
+"""
 
 
 class Bot:
-    USERNAME = "gcservantbot"
+    USERNAME = os.environ.get("BOT_USERNAME", "gcservantbot")
     COMMANDS = [
-        "gcon",
+        "gc",
         "gcoff",
         "status",
         "ping",
         "github",
+        "help",
     ]
     DEFAULT_TTL = 86400
 
-    def __init__(self, client: Client, gc: GarbageCollector) -> None:
+    def __init__(
+        self,
+        client: Client,
+        collector: GarbageCollector,
+    ) -> None:
         self.client = client
-        self.gc = gc
+        self.collector = collector
 
     def start(self) -> None:
-        poller = UpdatesPoller()
         while True:
             try:
-                updates = poller.get_updates()
+                updates = self.client.get_updates()
             except KeyboardInterrupt:
                 logger.info("Exiting...")
                 return
@@ -247,35 +290,33 @@ class Bot:
             for update in updates:
                 logger.debug("Got new update: %s", update)
                 if "message" in update:
-                    self.dispatch_message(update["message"])
+                    message = Message.from_json(update["message"])
+                    self.process_message(message)
 
-    def dispatch_message(self, message: dict) -> None:
-        entities = message.get("entities", [])
-        commands = [e for e in entities if e["type"] == "bot_command"]
-        command_entity = next(iter(commands), None)
+    def process_message(self, message: Message) -> None:
+        logger.debug("Processing message %s", message)
+        command = message.get_command()
+        if command and command.offset == 0:
+            self.dispatch_command(command)
+            return
 
-        if command_entity and command_entity["offset"] == 0:
-            self.dispatch_command(message, command_entity)
-        else:
-            self.process_message(message)
+        self.collector.add_message(message)
 
-    def dispatch_command(self, message: dict, entity: dict) -> None:
-        command = Command.from_message_and_entity(message, entity)
-
+    def dispatch_command(self, command: Command) -> None:
         if command.username and command.username != self.USERNAME:
             return  # don't process commands that aren't meant for us
 
         logger.info(
-            "Got new command: '%s' with params %s", command.command, command.params
+            "Got new command: '%s' with params %s", command.command_str, command.params
         )
 
-        if command.command not in self.COMMANDS:
+        if command.command_str not in self.COMMANDS:
             self.client.post_message(
-                command.chat_id, f"Unrecognized command: {command.command}"
+                command.chat_id, f"Unrecognized command: {command.command_str}"
             )
             return
 
-        handler = getattr(self, f"process_{command.command}", None)
+        handler = getattr(self, f"process_{command.command_str}", None)
         if handler and callable(handler):
             try:
                 handler(command)
@@ -283,11 +324,7 @@ class Bot:
                 if exc.message:
                     self.client.post_message(command.chat_id, exc.message)
 
-    def process_message(self, message: dict) -> None:
-        logger.debug("Processing regular chat message")
-        self.gc.add_message(message)
-
-    def process_gcon(self, command: Command) -> None:
+    def process_gc(self, command: Command) -> None:
         if command.params:
             ttl_raw = command.params[0]
             try:
@@ -304,7 +341,7 @@ class Bot:
         else:
             ttl = self.DEFAULT_TTL
 
-        self.gc.enable(ttl)
+        self.collector.enable(ttl)
         logging.debug("GC enabled")
 
         self.client.post_message(
@@ -314,7 +351,7 @@ class Bot:
         )
 
     def process_gcoff(self, command: Command) -> None:
-        self.gc.disable()
+        self.collector.disable()
         logging.debug("GC disabled")
 
         self.client.post_message(
@@ -324,25 +361,29 @@ class Bot:
         )
 
     def process_status(self, command: Command) -> None:
-        status = json.dumps(self.gc.status(), indent=4)
+        status = json.dumps(self.collector.status(), indent=4)
 
         self.client.post_message(command.chat_id, f"Status: {status}")
 
     def process_ping(self, command: Command) -> None:
-        self.client.post_message(command.chat_id, f"Pong")
+        self.client.post_message(command.chat_id, f"pong")
 
     def process_github(self, command: Command) -> None:
         self.client.post_message(command.chat_id, f"https://github.com/longedok/gcbot")
+
+    def process_help(self, command: Command) -> None:
+        self.client.post_message(command.chat_id, HELP)
 
 
 def main() -> None:
     init_storage()
 
     client = Client()
-    gc = GarbageCollector(client)
-    gc.start()
 
-    bot = Bot(client, gc)
+    collector = GarbageCollector(client)
+    collector.start()
+
+    bot = Bot(client, collector)
     bot.start()
 
 

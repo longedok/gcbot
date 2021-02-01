@@ -16,7 +16,7 @@ session = Session()
 Base = declarative_base()
 
 
-class Message(Base):
+class MessageRecord(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True)
@@ -26,7 +26,7 @@ class Message(Base):
     deleted = Column(Boolean, default=False)
 
     def __str__(self) -> str:
-        return f"Message(mid={self.message_id}, delete_after={self.delete_after})"
+        return f"MessageRecord(mid={self.message_id}, delete_after={self.delete_after})"
 
     def __repr__(self) -> str:
         return str(self)
