@@ -5,9 +5,7 @@ import copy
 
 import pytest
 
-
 CHAT_ID = -593555199
-
 
 UPDATE = {
     "update_id": 360316438,
@@ -69,21 +67,25 @@ def collector():
 
 
 class TestBot:
-    def test_ping(self, client, collector):
+    @pytest.fixture
+    def bot(self, client, collector):
+        return Bot(client, collector)
+
+    def test_ping(self, client, bot):
         new_message(client, "/ping")
-        Bot(client, collector).start()
+        bot.start()
 
         assert get_response(client) == (CHAT_ID, "pong")
 
-    def test_message(self, client, collector):
+    def test_message(self, client, collector, bot):
         new_message(client, "Hi there!")
-        Bot(client, collector).start()
+        bot.start()
 
         assert collector.add_message.called
 
-    def test_gc(self, client, collector):
+    def test_gc(self, client, collector, bot):
         new_message(client, "/gc")
-        Bot(client, collector).start()
+        bot.start()
 
         response = (
             f"Garbage collector enabled - automatically removing all new messages "
@@ -93,9 +95,9 @@ class TestBot:
         assert get_response(client) == (CHAT_ID, response)
         assert collector.enable.call_args.args == (86400,)
 
-    def test_gc_params(self, client, collector):
+    def test_gc_params(self, client, collector, bot):
         new_message(client, "/gc 15")
-        Bot(client, collector).start()
+        bot.start()
 
         response = (
             f"Garbage collector enabled - automatically removing all new messages "
@@ -112,18 +114,18 @@ class TestBot:
         "/gc 345123",
         "/gc qwefno oenf wqoiefn wqefoin",
     ])
-    def test_gc_param_validation(self, client, collector, message):
+    def test_gc_param_validation(self, client, bot, message):
         new_message(client, message)
-        Bot(client, collector).start()
+        bot.start()
 
         chat_id, text = get_response(client)
 
         assert chat_id == CHAT_ID
         assert "valid integer" in text
 
-    def test_gc_off(self, client, collector):
+    def test_gc_off(self, client, collector, bot):
         new_message(client, "/gcoff")
-        Bot(client, collector).start()
+        bot.start()
 
         response = (
             "Garbage collector disabled - new messages won't be removed automatically."
@@ -132,24 +134,24 @@ class TestBot:
         assert get_response(client) == (CHAT_ID, response)
         assert collector.disable.called
 
-    def test_status(self, client, collector):
+    def test_status(self, client, bot):
         new_message(client, "/status")
-        Bot(client, collector).start()
+        bot.start()
 
         chat_id, text = get_response(client)
 
         assert chat_id == CHAT_ID
         assert "Status:" in text
 
-    def test_help(self, client, collector):
+    def test_help(self, client, bot):
         new_message(client, "/help")
-        Bot(client, collector).start()
+        bot.start()
 
         assert get_response(client) == (CHAT_ID, HELP)
 
-    def test_invalid_command(self, client, collector):
+    def test_invalid_command(self, client, bot):
         new_message(client, "/invalid")
-        Bot(client, collector).start()
+        bot.start()
 
         chat_id, text = get_response(client)
         assert chat_id == CHAT_ID
