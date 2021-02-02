@@ -154,7 +154,7 @@ class GarbageCollector(Thread):
 
     def collect_garbage(self) -> None:
         threshold = int(datetime.now().timestamp())
-        records = (
+        records = list(
             self.session
             .query(MessageRecord)
             .filter(
