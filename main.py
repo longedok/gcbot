@@ -44,11 +44,13 @@ class Client:
                 "Got non-200 response: %s %s", response.status_code, response.text
             )
 
-    def _get(self, url: str, **params: Any) -> dict:
+    def _get(self, url: str, silent: bool = True, **params: Any) -> dict:
         headers = {
             "Content-Type": "application/json",
         }
         response = requests.get(url, params=params, headers=headers)
+        if not silent:
+            response.raise_for_status()
 
         if response.status_code != 200:
             logger.error(
@@ -62,6 +64,10 @@ class Client:
             logger.error("Got invalid json %s", response.text)
             return {}  # TODO: raise an exception
 
+        if not data["ok"]:
+            logger.error("Got non-ok response: %s", data)
+            return {}  # TODO: raise an exception
+
         return data
 
     @property
@@ -72,15 +78,12 @@ class Client:
         data = self._get(
             f"{BASE_URL}/getUpdates",
             timeout=self.POLL_INTERVAL,
-            offset=self.offset
+            offset=self.offset,
+            silent=False  # don't fail silently to avoid generating a lot of requests 
+                          # in the polling loop
         )
 
-        if not data["ok"]:
-            logger.error("Got non-ok response: %s", data)
-            return []  # TODO: raise an exception
-
-        updates = data["result"]
-        if updates:
+        if updates := data.get("result", []):
             last_update = updates[-1]
             self.last_update_id = last_update["update_id"]
 

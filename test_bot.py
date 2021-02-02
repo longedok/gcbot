@@ -147,3 +147,11 @@ class TestBot:
 
         assert get_response(client) == (CHAT_ID, HELP)
 
+    def test_invalid_command(self, client, collector):
+        new_message(client, "/invalid")
+        Bot(client, collector).start()
+
+        chat_id, text = get_response(client)
+        assert chat_id == CHAT_ID
+        assert "unrecognized command" in text.lower()
+
