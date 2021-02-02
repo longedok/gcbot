@@ -163,8 +163,7 @@ class GarbageCollector(Thread):
             )
         )
 
-        record_ids = [r.message_id for r in records]
-        if record_ids:
+        if record_ids := [r.message_id for r in records]:
             logger.debug("Collected %s", record_ids)
 
         for record in records:
