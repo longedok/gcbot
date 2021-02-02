@@ -1,5 +1,5 @@
 import logging
-from main import Bot
+from main import Bot, HELP
 from unittest.mock import Mock
 import copy
 
@@ -46,7 +46,7 @@ def make_message(text):
     return body
 
 
-def add_message(client, text):
+def new_message(client, text):
     message = make_message(text)
     client.get_updates = Mock(side_effect=[[message], KeyboardInterrupt])
     return message
@@ -63,24 +63,26 @@ def client():
 
 @pytest.fixture
 def collector():
-    return Mock()
+    mock = Mock()
+    mock.status = Mock(return_value={})
+    return mock
 
 
 class TestBot:
-    def test_ping(self, client):
-        add_message(client, "/ping")
-        Bot(client, Mock()).start()
+    def test_ping(self, client, collector):
+        new_message(client, "/ping")
+        Bot(client, collector).start()
 
         assert get_response(client) == (CHAT_ID, "pong")
 
     def test_message(self, client, collector):
-        add_message(client, "Hi there!")
+        new_message(client, "Hi there!")
         Bot(client, collector).start()
 
         assert collector.add_message.called
 
     def test_gc(self, client, collector):
-        update = add_message(client, "/gc")
+        new_message(client, "/gc")
         Bot(client, collector).start()
 
         response = (
@@ -92,7 +94,7 @@ class TestBot:
         assert collector.enable.call_args.args == (86400,)
 
     def test_gc_params(self, client, collector):
-        update = add_message(client, "/gc 15")
+        new_message(client, "/gc 15")
         Bot(client, collector).start()
 
         response = (
@@ -103,8 +105,24 @@ class TestBot:
         assert get_response(client) == (CHAT_ID, response)
         assert collector.enable.call_args.args == (15,)
 
+    @pytest.mark.parametrize("message", [
+        "/gc abcd",
+        "/gc -15",
+        "/gc 2.34",
+        "/gc 345123",
+        "/gc qwefno oenf wqoiefn wqefoin",
+    ])
+    def test_gc_param_validation(self, client, collector, message):
+        new_message(client, message)
+        Bot(client, collector).start()
+
+        chat_id, text = get_response(client)
+
+        assert chat_id == CHAT_ID
+        assert "valid integer" in text
+
     def test_gc_off(self, client, collector):
-        update = add_message(client, "/gcoff")
+        new_message(client, "/gcoff")
         Bot(client, collector).start()
 
         response = (
@@ -113,4 +131,19 @@ class TestBot:
 
         assert get_response(client) == (CHAT_ID, response)
         assert collector.disable.called
+
+    def test_status(self, client, collector):
+        new_message(client, "/status")
+        Bot(client, collector).start()
+
+        chat_id, text = get_response(client)
+
+        assert chat_id == CHAT_ID
+        assert "Status:" in text
+
+    def test_help(self, client, collector):
+        new_message(client, "/help")
+        Bot(client, collector).start()
+
+        assert get_response(client) == (CHAT_ID, HELP)
 
