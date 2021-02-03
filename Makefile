@@ -8,11 +8,12 @@ upload:
 	docker build -t longedok/main .
 	docker push longedok/main
 
-rund:
-	docker build -t longedok/main .
-	docker rm -f bot || true
-	docker run -d -e TOKEN=${TOKEN} -e BOT_USERNAME=${BOT_USERNAME}\
-		-e DATADIR=/data -v botdb:/data --name bot longedok/main
+run:
+	docker-compose stop bot || true
+	docker-compose up -d --build --no-deps bot
 
 test:
 	pytest
+
+psql:
+	psql -h localhost -p 5432 -U postgres ${POSTGRES_DB}

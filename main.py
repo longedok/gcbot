@@ -7,11 +7,15 @@ import logging
 import time
 import json
 from datetime import datetime
-from typing import Any
-from threading import Thread
+from typing import Any, TYPE_CHECKING, TypeVar, Callable, cast
+from threading import Thread, Lock
 from dataclasses import dataclass
+from functools import wraps
 
 from db import init_storage, Session, session, MessageRecord, Settings
+
+if TYPE_CHECKING:
+    from datetime import timedelta
 
 TOKEN = os.environ["TOKEN"]
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
@@ -21,6 +25,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     level=logging.DEBUG,
 )
+logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
 logger = logging.getLogger()
 
@@ -107,59 +112,90 @@ class Client:
         self._post(f"{BASE_URL}/deleteMessage", body)
 
 
-class GarbageCollector(Thread):
-    def __init__(
-        self,
-        client: Client,
-    ) -> None:
-        super().__init__(daemon=True)
+F = TypeVar("F", bound=Callable[..., Any])
 
+
+def no_sql_log(func: F) -> F:
+    @wraps(func)
+    def inner(*args, **kwargs):  # type: ignore
+        logger = logging.getLogger('sqlalchemy.engine')
+        level = logger.level
+
+        logger.setLevel(logging.WARNING)
+        result = func(*args, **kwargs)
+        logger.setLevel(level)
+
+        return result
+
+    return cast(F, inner)
+
+
+class GarbageCollector(Thread):
+    def __init__(self, client: Client) -> None:
+        super().__init__(daemon=True)
         self.client = client
 
-        settings = self._get_settings()
-        self.enabled = settings.gc_enabled
-        self.ttl = settings.gc_ttl
+    def _get_settings(self, chat_id: int) -> Settings:
+        settings = session.query(Settings).filter(
+            Settings.chat_id == chat_id,
+        ).first()
 
-    def _get_settings(self) -> Settings:
-        return session.query(Settings).first()
+        if not settings:
+            settings = Settings(chat_id=chat_id)
+            session.add(settings)
+            session.commit()
 
-    def enable(self, ttl: int) -> None:
-        self.enabled = True
-        self.ttl = ttl
+        return settings
 
-        settings = self._get_settings()
-        settings.gc_enabled = self.enabled
-        settings.gc_ttl = self.ttl
+    def enable(self, chat_id: int, ttl: int) -> None:
+        settings = self._get_settings(chat_id)
+        settings.gc_enabled = True
+        settings.gc_ttl = ttl
         session.add(settings)
         session.commit()
 
-    def disable(self) -> None:
-        self.enabled = False
-        settings = self._get_settings()
+    def disable(self, chat_id: int) -> None:
+        settings = self._get_settings(chat_id)
         settings.gc_enabled = False
         session.add(settings)
         session.commit()
 
-    def add_message(self, message: Message) -> None:
-        if not self.enabled:
-            return
+    def cancel(self, chat_id: int) -> int:
+        cancelled = session.query(MessageRecord).filter(
+            MessageRecord.chat_id == chat_id,
+            MessageRecord.deleted == False,
+            MessageRecord.should_delete == True,
+        ).update({"should_delete": False})
 
+        session.commit()
+
+        return cancelled
+
+    def add_message(self, message: Message) -> None:
+        settings = self._get_settings(message.chat_id)
+        now = int(datetime.now().timestamp())
+        delete_after = now + settings.gc_ttl if settings.gc_enabled else None
         record = MessageRecord(
-            message_id=message.message_id,
             chat_id=message.chat_id,
-            delete_after=message.date + self.ttl,
+            message_id=message.message_id,
+            date=message.date,
+            delete_after=delete_after,
+            should_delete=settings.gc_enabled,
         )
         session.add(record)
         session.commit()
 
+    @no_sql_log
     def collect_garbage(self) -> None:
-        threshold = int(datetime.now().timestamp())
+        now = int(datetime.now().timestamp())
+
         records = list(
             self.session
             .query(MessageRecord)
             .filter(
-                MessageRecord.delete_after <= threshold,
-                MessageRecord.deleted == False
+                MessageRecord.delete_after <= now,
+                MessageRecord.deleted == False,
+                MessageRecord.should_delete == True,
             )
         )
 
@@ -179,18 +215,23 @@ class GarbageCollector(Thread):
             self.collect_garbage()
             time.sleep(1)
 
-    def count_pending(self) -> int:
+    def count_pending(self, chat_id: int) -> int:
         return (
             session.query(MessageRecord)
-            .filter(MessageRecord.deleted == False)
+            .filter(
+                MessageRecord.chat_id == chat_id,
+                MessageRecord.deleted == False,
+                MessageRecord.should_delete == True,
+            )
             .count()
         )
 
-    def status(self) -> dict[str, Any]:
+    def status(self, chat_id: int) -> dict[str, Any]:
+        settings = self._get_settings(chat_id)
         return {
-            "gc_enabled": self.enabled,
-            "gc_ttl": self.ttl,
-            "gc_pending_count": self.count_pending(),
+            "gc_enabled": settings.gc_enabled,
+            "gc_ttl": settings.gc_ttl,
+            "gc_pending_count": self.count_pending(chat_id),
         }
 
 
@@ -254,6 +295,7 @@ Supported commands:
 
 /gc <i>ttl</i> - Enable automatic removal of messages after <i>ttl</i> seconds, e.g. <code>/gc 3600</code> to remove new messages after 1 hour. Default <i>ttl</i> is 86400 seconds (1 day).
 /gcoff - Disable automatic removal of messages.
+/cancel - Cancel removal of all pending messages.
 /status - Get current status.
 /github - Link to the bot's source code.
 /ping - Sends "pong" in response.
@@ -266,6 +308,7 @@ class Bot:
     COMMANDS = [
         "gc",
         "gcoff",
+        "cancel",
         "status",
         "ping",
         "github",
@@ -273,13 +316,10 @@ class Bot:
     ]
     DEFAULT_TTL = 86400
 
-    def __init__(
-        self,
-        client: Client,
-        collector: GarbageCollector,
-    ) -> None:
+    def __init__(self, client: Client, collector: GarbageCollector) -> None:
         self.client = client
         self.collector = collector
+        self.start_at = datetime.now()
 
     def start(self) -> None:
         while True:
@@ -296,13 +336,25 @@ class Bot:
                     self.process_message(message)
 
     def process_message(self, message: Message) -> None:
-        logger.debug("Processing message %s", message)
+        logger.debug("Processing %s", message)
         command = message.get_command()
         if command and command.offset == 0:
             self.dispatch_command(command)
             return
 
         self.collector.add_message(message)
+
+    def _get_uptime(self) -> timedelta:
+        return datetime.now() - self.start_at
+
+    def status(self) -> dict[str, Any]:
+        uptime = self._get_uptime()
+        return {
+            "bot_uptime": format_uptime(uptime),
+        }
+
+    def _reply(self, chat_id: int, text: str) -> None:
+        self.client.post_message(chat_id, text)
 
     def dispatch_command(self, command: Command) -> None:
         if command.username and command.username != self.USERNAME:
@@ -313,7 +365,7 @@ class Bot:
         )
 
         if command.command_str not in self.COMMANDS:
-            self.client.post_message(
+            self._reply(
                 command.chat_id, f"Unrecognized command: {command.command_str}"
             )
             return
@@ -324,7 +376,7 @@ class Bot:
                 handler(command)
             except ValidationError as exc:
                 if exc.message:
-                    self.client.post_message(command.chat_id, exc.message)
+                    self._reply(command.chat_id, exc.message)
 
     def process_gc(self, command: Command) -> None:
         if command.params:
@@ -343,38 +395,54 @@ class Bot:
         else:
             ttl = self.DEFAULT_TTL
 
-        self.collector.enable(ttl)
+        self.collector.enable(command.chat_id, ttl)
         logging.debug("GC enabled")
 
-        self.client.post_message(
+        self._reply(
             command.chat_id,
             f"Garbage collector enabled - automatically removing all new messages "
             f"after {ttl} seconds."
         )
 
     def process_gcoff(self, command: Command) -> None:
-        self.collector.disable()
+        self.collector.disable(command.chat_id)
         logging.debug("GC disabled")
-
-        self.client.post_message(
+        self._reply(
             command.chat_id,
             "Garbage collector disabled - "
             "new messages won't be removed automatically."
         )
 
-    def process_status(self, command: Command) -> None:
-        status = json.dumps(self.collector.status(), indent=4)
+    def process_cancel(self, command: Command) -> None:
+        cancelled = self.collector.cancel(command.chat_id)
+        self._reply(
+            command.chat_id, f"Cancelled removal of {cancelled} pending messages."
+        )
 
-        self.client.post_message(command.chat_id, f"Status: {status}")
+    def process_status(self, command: Command) -> None:
+        status = self.collector.status(command.chat_id)
+        status.update(self.status())
+        status_str = format_status(status)
+        self._reply(command.chat_id, f"Status: {status_str}")
 
     def process_ping(self, command: Command) -> None:
-        self.client.post_message(command.chat_id, f"pong")
+        self._reply(command.chat_id, f"pong")
 
     def process_github(self, command: Command) -> None:
-        self.client.post_message(command.chat_id, f"https://github.com/longedok/gcbot")
+        self._reply(command.chat_id, f"https://github.com/longedok/gcbot")
 
     def process_help(self, command: Command) -> None:
-        self.client.post_message(command.chat_id, HELP)
+        self._reply(command.chat_id, HELP)
+
+
+def format_status(status: dict[str, Any]) -> str:
+    return json.dumps(status, indent=4)
+
+
+def format_uptime(uptime: timedelta) -> str:
+    uptime_str = str(uptime)
+    time_str, _, _ = uptime_str.partition(".")
+    return time_str
 
 
 def main() -> None:

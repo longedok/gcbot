@@ -1,6 +1,6 @@
 FROM python:3.9.1-alpine
 
-RUN apk add --update gcc musl-dev libffi-dev openssl-dev
+RUN apk add --update gcc musl-dev libffi-dev openssl-dev postgresql-libs postgresql-dev
 
 ENV POETRY_VERSION=1.1.4 \
   PIP_DISABLE_PIP_VERSION_CHECK=on

@@ -63,6 +63,7 @@ def client():
 def collector():
     mock = Mock()
     mock.status = Mock(return_value={})
+    mock.cancel = Mock(return_value=5)
     return mock
 
 
@@ -71,17 +72,17 @@ class TestBot:
     def bot(self, client, collector):
         return Bot(client, collector)
 
-    def test_ping(self, client, bot):
-        new_message(client, "/ping")
-        bot.start()
-
-        assert get_response(client) == (CHAT_ID, "pong")
-
     def test_message(self, client, collector, bot):
         new_message(client, "Hi there!")
         bot.start()
 
         assert collector.add_message.called
+
+    def test_ping(self, client, bot):
+        new_message(client, "/ping")
+        bot.start()
+
+        assert get_response(client) == (CHAT_ID, "pong")
 
     def test_gc(self, client, collector, bot):
         new_message(client, "/gc")
@@ -93,7 +94,7 @@ class TestBot:
         )
 
         assert get_response(client) == (CHAT_ID, response)
-        assert collector.enable.call_args.args == (86400,)
+        assert collector.enable.call_args.args == (CHAT_ID, 86400)
 
     def test_gc_params(self, client, collector, bot):
         new_message(client, "/gc 15")
@@ -105,7 +106,7 @@ class TestBot:
         )
 
         assert get_response(client) == (CHAT_ID, response)
-        assert collector.enable.call_args.args == (15,)
+        assert collector.enable.call_args.args == (CHAT_ID, 15)
 
     @pytest.mark.parametrize("message", [
         "/gc abcd",
@@ -132,7 +133,16 @@ class TestBot:
         )
 
         assert get_response(client) == (CHAT_ID, response)
-        assert collector.disable.called
+        assert collector.disable.call_args.args == (CHAT_ID,)
+
+    def test_cancel(self, client, bot, collector):
+        new_message(client, "/cancel")
+        bot.start()
+
+        response = "Cancelled removal of 5 pending messages."
+
+        assert get_response(client) == (CHAT_ID, response)
+        assert collector.cancel.call_args.args == (CHAT_ID,)
 
     def test_status(self, client, bot):
         new_message(client, "/status")
@@ -148,6 +158,13 @@ class TestBot:
         bot.start()
 
         assert get_response(client) == (CHAT_ID, HELP)
+
+    def test_username_command(self, client, bot):
+        new_message(client, "/ping@gcservantbot")
+        bot.USERNAME = "gcservantbot"
+        bot.start()
+
+        assert get_response(client) == (CHAT_ID, "pong")
 
     def test_invalid_command(self, client, bot):
         new_message(client, "/invalid")
