@@ -1,9 +1,9 @@
-import logging
-from main import Bot, HELP
 from unittest.mock import Mock
 import copy
 
 import pytest
+
+from bot import Bot, HELP
 
 CHAT_ID = -593555199
 
@@ -44,9 +44,10 @@ def make_message(text):
     return body
 
 
-def new_message(client, text):
+def new_message(bot, text):
     message = make_message(text)
-    client.get_updates = Mock(side_effect=[[message], KeyboardInterrupt])
+    bot.client.get_updates = Mock(side_effect=[[message], KeyboardInterrupt])
+    bot.start()
     return message
 
 
@@ -72,40 +73,34 @@ class TestBot:
     def bot(self, client, collector):
         return Bot(client, collector)
 
-    def test_message(self, client, collector, bot):
-        new_message(client, "Hi there!")
-        bot.start()
-
+    def test_message(self, collector, bot):
+        new_message(bot, "Hi there!")
         assert collector.add_message.called
 
-    def test_ping(self, client, bot):
-        new_message(client, "/ping")
-        bot.start()
+    def test_ping(self, bot):
+        new_message(bot, "/ping")
+        assert get_response(bot.client) == (CHAT_ID, "pong")
 
-        assert get_response(client) == (CHAT_ID, "pong")
-
-    def test_gc(self, client, collector, bot):
-        new_message(client, "/gc")
-        bot.start()
+    def test_gc(self, collector, bot):
+        new_message(bot, "/gc")
 
         response = (
             f"Garbage collector enabled - automatically removing all new messages "
             f"after 86400 seconds."
         )
 
-        assert get_response(client) == (CHAT_ID, response)
+        assert get_response(bot.client) == (CHAT_ID, response)
         assert collector.enable.call_args.args == (CHAT_ID, 86400)
 
-    def test_gc_params(self, client, collector, bot):
-        new_message(client, "/gc 15")
-        bot.start()
+    def test_gc_params(self, collector, bot):
+        new_message(bot, "/gc 15")
 
         response = (
             f"Garbage collector enabled - automatically removing all new messages "
             f"after 15 seconds."
         )
 
-        assert get_response(client) == (CHAT_ID, response)
+        assert get_response(bot.client) == (CHAT_ID, response)
         assert collector.enable.call_args.args == (CHAT_ID, 15)
 
     @pytest.mark.parametrize("message", [
@@ -115,62 +110,54 @@ class TestBot:
         "/gc 345123",
         "/gc qwefno oenf wqoiefn wqefoin",
     ])
-    def test_gc_param_validation(self, client, bot, message):
-        new_message(client, message)
-        bot.start()
+    def test_gc_param_validation(self, bot, message):
+        new_message(bot, message)
 
-        chat_id, text = get_response(client)
+        chat_id, text = get_response(bot.client)
 
         assert chat_id == CHAT_ID
         assert "valid integer" in text
 
-    def test_gc_off(self, client, collector, bot):
-        new_message(client, "/gcoff")
-        bot.start()
+    def test_gc_off(self, collector, bot):
+        new_message(bot, "/gcoff")
 
         response = (
             "Garbage collector disabled - new messages won't be removed automatically."
         )
 
-        assert get_response(client) == (CHAT_ID, response)
+        assert get_response(bot.client) == (CHAT_ID, response)
         assert collector.disable.call_args.args == (CHAT_ID,)
 
-    def test_cancel(self, client, bot, collector):
-        new_message(client, "/cancel")
-        bot.start()
+    def test_cancel(self, collector, bot):
+        new_message(bot, "/cancel")
 
         response = "Cancelled removal of 5 pending messages."
 
-        assert get_response(client) == (CHAT_ID, response)
+        assert get_response(bot.client) == (CHAT_ID, response)
         assert collector.cancel.call_args.args == (CHAT_ID,)
 
-    def test_status(self, client, bot):
-        new_message(client, "/status")
-        bot.start()
+    def test_status(self, bot):
+        new_message(bot, "/status")
 
-        chat_id, text = get_response(client)
+        chat_id, text = get_response(bot.client)
 
         assert chat_id == CHAT_ID
         assert "Status:" in text
 
-    def test_help(self, client, bot):
-        new_message(client, "/help")
-        bot.start()
+    def test_help(self, bot):
+        new_message(bot, "/help")
+        assert get_response(bot.client) == (CHAT_ID, HELP)
 
-        assert get_response(client) == (CHAT_ID, HELP)
-
-    def test_username_command(self, client, bot):
-        new_message(client, "/ping@gcservantbot")
+    def test_username_command(self, bot):
         bot.USERNAME = "gcservantbot"
-        bot.start()
+        new_message(bot, "/ping@gcservantbot")
 
-        assert get_response(client) == (CHAT_ID, "pong")
+        assert get_response(bot.client) == (CHAT_ID, "pong")
 
-    def test_invalid_command(self, client, bot):
-        new_message(client, "/invalid")
-        bot.start()
+    def test_invalid_command(self, bot):
+        new_message(bot, "/invalid")
 
-        chat_id, text = get_response(client)
+        chat_id, text = get_response(bot.client)
         assert chat_id == CHAT_ID
         assert "unrecognized command" in text.lower()
 
