@@ -13,7 +13,7 @@ BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 
 class Client:
-    POLL_INTERVAL = 120
+    POLL_INTERVAL = 60
 
     def __init__(self, last_update_id: int | None = None) -> None:
         self.last_update_id = last_update_id

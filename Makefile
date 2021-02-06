@@ -4,16 +4,16 @@ build:
 push:
 	docker push longedok/main
 
-upload:
+publish:
 	docker build -t longedok/main .
 	docker push longedok/main
 
 run:
 	docker-compose stop bot || true
-	docker-compose up -d --build --no-deps bot
+	docker-compose -f docker-compose-dev.yml up -d --build --no-deps bot
 
 up:
-	docker-compose up
+	docker-compose -f docker-compose-dev.yml up
 
 test:
 	pytest

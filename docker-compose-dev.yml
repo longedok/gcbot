@@ -1,7 +1,7 @@
 version: "3.9"
 services:
     bot:
-        image: longedok/main:latest
+        build: .
         links:
             - postgres
         env_file:
