@@ -2,9 +2,9 @@
 import logging
 
 from db import init_storage
+from bot import Bot
 from client import Client
 from collector import GarbageCollector
-from bot import Bot
 
 logging.basicConfig(
     format="%(asctime)s.%(msecs)03d %(levelname)-5s %(name)s > %(message)s",

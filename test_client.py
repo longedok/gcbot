@@ -1,4 +1,5 @@
 import pytest
+from requests.exceptions import Timeout
 
 from client import Client, BASE_URL
 
@@ -38,4 +39,9 @@ class TestClient:
         })
         updates = client.get_updates()
         assert updates == [UPDATE]
+
+    def test_get_updates_timeout(self, client, requests_mock):
+        requests_mock.get(f"{BASE_URL}/getUpdates", exc=Timeout)
+        updates = client.get_updates()
+        assert updates == []
 

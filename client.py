@@ -4,6 +4,7 @@ import logging
 import os
 
 import requests
+from requests.exceptions import Timeout
 
 logger = logging.getLogger(__name__)
 
@@ -12,15 +13,13 @@ BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 
 class Client:
-    POLL_INTERVAL = 300
+    POLL_INTERVAL = 120
 
     def __init__(self, last_update_id: int | None = None) -> None:
         self.last_update_id = last_update_id
 
     def _post(self, url: str, data: dict) -> None:
-        headers = {
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
         response = requests.post(url, json=data, headers=headers)
 
         if response.status_code == 200:
@@ -30,11 +29,15 @@ class Client:
                 "Got non-200 response: %s %s", response.status_code, response.text
             )
 
-    def _get(self, url: str, silent: bool = True, **params: Any) -> dict:
-        headers = {
-            "Content-Type": "application/json",
-        }
-        response = requests.get(url, params=params, headers=headers)
+    def _get(
+        self,
+        url: str,
+        params: dict[str, Any],
+        silent: bool = True,
+        **request_params: Any,
+    ) -> dict:
+        headers = {"Content-Type": "application/json"}
+        response = requests.get(url, params=params, headers=headers, **request_params)
         if not silent:
             response.raise_for_status()
 
@@ -61,13 +64,20 @@ class Client:
         return self.last_update_id + 1 if self.last_update_id else None
 
     def get_updates(self) -> list[dict]:
-        data = self._get(
-            f"{BASE_URL}/getUpdates",
-            timeout=self.POLL_INTERVAL,
-            offset=self.offset,
-            silent=False  # don't fail silently to avoid generating a lot of requests 
-                          # in the polling loop
-        )
+        try:
+            data = self._get(
+                f"{BASE_URL}/getUpdates",
+                params={
+                    "timeout": self.POLL_INTERVAL,
+                    "offset": self.offset,
+                },
+                timeout=self.POLL_INTERVAL + 5,
+                silent=False  # don't fail silently to avoid generating a lot of 
+                              # requests in the polling loop
+            )
+        except Timeout:
+            logger.error("getUpdates request timed out")
+            return []  # TODO: maybe raise an exception
 
         if updates := data.get("result", []):
             last_update = updates[-1]

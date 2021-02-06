@@ -12,6 +12,9 @@ run:
 	docker-compose stop bot || true
 	docker-compose up -d --build --no-deps bot
 
+up:
+	docker-compose up
+
 test:
 	pytest
 

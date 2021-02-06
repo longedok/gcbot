@@ -87,7 +87,7 @@ class Bot:
 
     def dispatch_command(self, command: Command) -> None:
         if command.username and command.username != self.USERNAME:
-            return  # don't process commands that aren't meant for us
+            return  # don't process commands that wasn't meant for us
 
         logger.info(
             "Got new command: '%s' with params %s", command.command_str, command.params
@@ -115,7 +115,7 @@ class Bot:
             ttl = self.DEFAULT_TTL
 
         self.collector.enable(command.chat_id, ttl)
-        logging.debug("GC enabled")
+        logger.debug("GC enabled")
 
         self._reply(
             command.chat_id,
@@ -125,7 +125,7 @@ class Bot:
 
     def process_gcoff(self, command: Command) -> None:
         self.collector.disable(command.chat_id)
-        logging.debug("GC disabled")
+        logger.debug("GC disabled")
         self._reply(
             command.chat_id,
             "Garbage collector disabled - "
