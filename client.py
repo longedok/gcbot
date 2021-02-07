@@ -24,7 +24,7 @@ class Client:
         response = requests.post(url, json=data, headers=self.headers)
 
         if response.status_code == 200:
-            logger.debug("Got response: %s", response.text)
+            logger.debug("POST response: %s", response.text)
         else:
             logger.error(
                 "Got non-200 response: %s %s", response.status_code, response.text

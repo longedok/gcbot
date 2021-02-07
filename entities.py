@@ -84,6 +84,5 @@ class Message:
         params = params_str.split() if params_str else []
 
         cls = self.COMMAND_CLASS.get(command_str, Command)
-
         return cls(command_str, params, username, offset, self)
 

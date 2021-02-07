@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, TypeVar, Callable, Any, cast
-from functools import wraps
+from functools import wraps, cache
 from threading import Thread
 
 from db import Session, Settings, MessageRecord, session
@@ -40,6 +40,7 @@ class GarbageCollector(Thread):
         super().__init__(daemon=True)
         self.client = client
 
+    @cache
     def _get_settings(self, chat_id: int) -> Settings:
         settings = session.query(Settings).filter(
             Settings.chat_id == chat_id,
@@ -53,6 +54,9 @@ class GarbageCollector(Thread):
         return settings
 
     def enable(self, chat_id: int, ttl: int) -> None:
+        logger.debug(
+            "Enabling garbage collector for chat %s with ttl %ss", chat_id, ttl
+        )
         settings = self._get_settings(chat_id)
         settings.gc_enabled = True
         settings.gc_ttl = ttl
@@ -60,6 +64,7 @@ class GarbageCollector(Thread):
         session.commit()
 
     def disable(self, chat_id: int) -> None:
+        logger.debug("Enabling garbage collector for chat %s", chat_id)
         settings = self._get_settings(chat_id)
         settings.gc_enabled = False
         session.add(settings)
@@ -77,6 +82,7 @@ class GarbageCollector(Thread):
         return cancelled
 
     def add_message(self, message: Message) -> None:
+        logger.debug("Adding message %s to the grabage collector", message.message_id)
         settings = self._get_settings(message.chat_id)
         now = int(datetime.now().timestamp())
         delete_after = now + settings.gc_ttl if settings.gc_enabled else None
@@ -114,7 +120,9 @@ class GarbageCollector(Thread):
             logger.debug("Collected %s", record_ids)
 
         for record in records:
-            logger.debug("Deleting message %s %s", record.chat_id, record.message_id)
+            logger.debug(
+                "Deleting message %s from chat %s", record.message_id, record.chat_id
+            )
             self.client.delete_message(record.chat_id, record.message_id)
             record.deleted = True
             self.session.add(record)

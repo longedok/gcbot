@@ -84,15 +84,17 @@ class Bot:
         }
 
     def _reply(self, chat_id: int, text: str) -> None:
+        logger.debug("Replying to chat %s: %s", chat_id, repr(text))
         self.client.post_message(chat_id, text)
 
     def dispatch_command(self, command: Command) -> None:
         if command.username and command.username != self.USERNAME:
+            logger.debug(
+                "Received command meant for another bot: %s@%s",
+                command.command_str,
+                command.username,
+            )
             return  # don't process commands that wasn't meant for us
-
-        logger.info(
-            "Got new command: '%s' with params %s", command.command_str, command.params
-        )
 
         if command.command_str not in self.COMMANDS:
             self._reply(
@@ -104,6 +106,7 @@ class Bot:
         if handler and callable(handler):
             try:
                 command.clean_params()
+                logger.info("Processing %s", command)
                 handler(command)
             except ValidationError as exc:
                 if exc.message:
