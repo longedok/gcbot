@@ -4,12 +4,12 @@ import os
 import logging
 import json
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from entities import Message, ValidationError
 
 if TYPE_CHECKING:
-    from datetime import datetime
+    from datetime import datetime, timedelta
 
     from client import Client
     from collector import GarbageCollector

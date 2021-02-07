@@ -11,6 +11,7 @@ from db import Session, Settings, MessageRecord, session
 
 if TYPE_CHECKING:
     from client import Client
+    from entities import Message
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,8 @@ def no_sql_log(func: F) -> F:
 
 
 class GarbageCollector(Thread):
+    MAX_HOURS = 48  # maximum time during which it's allowed to delete messages
+
     def __init__(self, client: Client) -> None:
         super().__init__(daemon=True)
         self.client = client
@@ -87,6 +90,11 @@ class GarbageCollector(Thread):
         session.add(record)
         session.commit()
 
+    @property
+    def unreachable_date(self) -> int:
+        date = datetime.now() - timedelta(hours=self.MAX_HOURS)
+        return int(date.timestamp())
+
     @no_sql_log
     def collect_garbage(self) -> None:
         now = int(datetime.now().timestamp())
@@ -97,6 +105,7 @@ class GarbageCollector(Thread):
             .filter(
                 MessageRecord.delete_after <= now,
                 MessageRecord.deleted == False,
+                MessageRecord.date > self.unreachable_date,
                 MessageRecord.should_delete == True,
             )
         )
@@ -123,6 +132,7 @@ class GarbageCollector(Thread):
             session.query(MessageRecord)
             .filter(
                 MessageRecord.chat_id == chat_id,
+                MessageRecord.date > self.unreachable_date,
                 MessageRecord.deleted == False,
                 MessageRecord.should_delete == True,
             )
@@ -130,12 +140,11 @@ class GarbageCollector(Thread):
         )
 
     def count_unreachable(self, chat_id: int) -> int:
-        threshold = datetime.now() - timedelta(hours=48)
         return (
             session.query(MessageRecord)
             .filter(
                 MessageRecord.chat_id == chat_id,
-                MessageRecord.date <= threshold,
+                MessageRecord.date <= self.unreachable_date,
                 MessageRecord.deleted == False,
             )
             .count()

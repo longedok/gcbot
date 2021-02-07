@@ -8,7 +8,7 @@ from client import Client
 from collector import GarbageCollector
 
 
-def init_logging():
+def init_logging() -> None:
     env = os.environ.get("ENVIRONMENT", "dev")
     logging.basicConfig(
         format="%(asctime)s.%(msecs)03d %(levelname)-5s %(name)s > %(message)s",
