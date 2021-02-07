@@ -17,10 +17,10 @@ class Client:
 
     def __init__(self, last_update_id: int | None = None) -> None:
         self.last_update_id = last_update_id
+        self.headers = {"Content-Type": "application/json"}
 
     def _post(self, url: str, data: dict) -> None:
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(url, json=data, headers=headers)
+        response = requests.post(url, json=data, headers=self.headers)
 
         if response.status_code == 200:
             logger.debug("Got response: %s", response.text)
@@ -36,8 +36,13 @@ class Client:
         silent: bool = True,
         **request_params: Any,
     ) -> dict:
-        headers = {"Content-Type": "application/json"}
-        response = requests.get(url, params=params, headers=headers, **request_params)
+        response = requests.get(
+            url,
+            params=params,
+            headers=self.headers,
+            **request_params,
+        )
+
         if not silent:
             response.raise_for_status()
 
@@ -51,10 +56,6 @@ class Client:
             data = response.json()
         except ValueError:
             logger.error("Got invalid json %s", response.text)
-            return {}  # TODO: raise an exception
-
-        if not data["ok"]:
-            logger.error("Got non-ok response: %s", data)
             return {}  # TODO: raise an exception
 
         return data
@@ -79,17 +80,21 @@ class Client:
             logger.error("getUpdates request timed out")
             return []  # TODO: maybe raise an exception
 
+        if not data["ok"]:
+            logger.error("getUpdates got non-ok response: %s", data)
+            return []  # TODO: raise an exception
+
         if updates := data.get("result", []):
             last_update = updates[-1]
             self.last_update_id = last_update["update_id"]
 
         return updates
 
-    def post_message(self, chat_id: int, text: str) -> None:
+    def post_message(self, chat_id: int, text: str, parse_mode: str = "HTML") -> None:
         body = {
             "chat_id": chat_id,
             "text": text,
-            "parse_mode": "HTML",
+            "parse_mode": parse_mode,
         }
 
         self._post(f"{BASE_URL}/sendMessage", body)

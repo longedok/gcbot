@@ -4,9 +4,6 @@ from sqlalchemy import create_engine, Integer, Column, DateTime, Boolean
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
-DATA_DIR = os.environ.get("DATADIR", os.path.dirname(os.path.realpath(__file__))) 
-DB_PATH = os.path.join(DATA_DIR, "bot.db")
-
 pg_user = os.environ["POSTGRES_USERNAME"]
 pg_pass = os.environ["POSTGRES_PASSWORD"]
 pg_db = os.environ["POSTGRES_DB"]

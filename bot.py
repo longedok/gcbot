@@ -51,6 +51,7 @@ class Bot:
         self.start_at = datetime.now()
 
     def start(self) -> None:
+        logger.info("Starting the polling loop")
         while True:
             try:
                 updates = self.client.get_updates()

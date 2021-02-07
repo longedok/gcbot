@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, TypeVar, Callable, Any, cast
 from functools import wraps
 from threading import Thread
@@ -105,6 +105,7 @@ class GarbageCollector(Thread):
             logger.debug("Collected %s", record_ids)
 
         for record in records:
+            logger.debug("Deleting message %s %s", record.chat_id, record.message_id)
             self.client.delete_message(record.chat_id, record.message_id)
             record.deleted = True
             self.session.add(record)
@@ -128,11 +129,24 @@ class GarbageCollector(Thread):
             .count()
         )
 
+    def count_unreachable(self, chat_id: int) -> int:
+        threshold = datetime.now() - timedelta(hours=48)
+        return (
+            session.query(MessageRecord)
+            .filter(
+                MessageRecord.chat_id == chat_id,
+                MessageRecord.date <= threshold,
+                MessageRecord.deleted == False,
+            )
+            .count()
+        )
+
     def status(self, chat_id: int) -> dict[str, Any]:
         settings = self._get_settings(chat_id)
         return {
             "gc_enabled": settings.gc_enabled,
             "gc_ttl": settings.gc_ttl,
             "gc_pending_count": self.count_pending(chat_id),
+            "gc_unreachable_count": self.count_unreachable(chat_id),
         }
 
