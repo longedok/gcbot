@@ -15,22 +15,23 @@ if TYPE_CHECKING:
 
 
 class CustomFormatter(logging.Formatter):
-    def format(self, record: LogRecord) -> str:
-        name = record.name
+    def _shorten_module_name(self, name: str) -> str:
         parts = name.split(".")
         if len(parts) > 1:
             parts_short = []
             for part in parts[:-1]:
                 parts_short.append(part[:1])
-            record.name = ".".join(parts_short + parts[-1:])
+            return ".".join(parts_short + parts[-1:])
+        return name
 
+    def format(self, record: LogRecord) -> str:
+        record.name = self._shorten_module_name(record.name)
         return super().format(record)
 
 
 def init_logging() -> None:
     logging.basicConfig(
         format="%(asctime)s %(levelname)-5s %(name)-16s > %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
         level=logging.DEBUG,
     )
 

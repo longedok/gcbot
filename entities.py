@@ -40,8 +40,7 @@ class GCCommand(Command):
             raise ValidationError(
                 "Please provide a \"time to live\" for messages as a valid "
                 "integer between 0 and 172800.\n"
-                "E.g. \"/gcon 3600\" to start removing new messages after one "
-                "hour."
+                "E.g. \"/gcon 3600\" to start removing new messages after one hour."
             )
 
         self.params_clean.append(ttl)

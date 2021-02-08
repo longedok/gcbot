@@ -90,7 +90,7 @@ class Bot:
     def dispatch_command(self, command: Command) -> None:
         if command.username and command.username != self.USERNAME:
             logger.debug(
-                "Received command meant for another bot: %s@%s",
+                "Received a command that's meant for another bot: %s@%s",
                 command.command_str,
                 command.username,
             )

@@ -34,7 +34,8 @@ def no_sql_log(func: F) -> F:
 
 
 class GarbageCollector(Thread):
-    MAX_HOURS = 48  # maximum time during which it's allowed to delete messages
+    MAX_HOURS = 48  # maximum time during which a message can be deleted after 
+                    # being posted
 
     def __init__(self, client: Client) -> None:
         super().__init__(daemon=True)
@@ -71,6 +72,7 @@ class GarbageCollector(Thread):
         session.commit()
 
     def cancel(self, chat_id: int) -> int:
+        logger.debug("Cancelling removal of pending messages in chat %s", chat_id)
         cancelled = session.query(MessageRecord).filter(
             MessageRecord.chat_id == chat_id,
             MessageRecord.deleted == False,
@@ -104,7 +106,6 @@ class GarbageCollector(Thread):
     @no_sql_log
     def collect_garbage(self) -> None:
         now = int(datetime.now().timestamp())
-
         records = list(
             self.session
             .query(MessageRecord)
@@ -126,8 +127,7 @@ class GarbageCollector(Thread):
             self.client.delete_message(record.chat_id, record.message_id)
             record.deleted = True
             self.session.add(record)
-
-        self.session.commit()
+            self.session.commit()
 
     def run(self) -> None:
         self.session = Session()
