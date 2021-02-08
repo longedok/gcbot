@@ -29,7 +29,7 @@ class CustomFormatter(logging.Formatter):
 
 def init_logging() -> None:
     logging.basicConfig(
-        format="%(asctime)s.%(msecs)03d %(levelname)-5s %(name)-16s > %(message)s",
+        format="%(asctime)s %(levelname)-5s %(name)-16s > %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         level=logging.DEBUG,
     )
