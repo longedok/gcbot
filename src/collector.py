@@ -107,6 +107,26 @@ class GarbageCollector(Thread):
         date = datetime.now() - timedelta(hours=self.MAX_HOURS)
         return int(date.timestamp())
 
+    def _delete_record(self, record: MessageRecord) -> None:
+        logger.debug(
+            "Deleting message %s from chat %s", record.message_id, record.chat_id
+        )
+
+        response = self.client.delete_message(record.chat_id, record.message_id)
+
+        if response.ok:
+            record.deleted = True
+        else:
+            record.should_delete = False
+            record.deleted = False
+            record.delete_failed = True
+            logger.error(
+                "Failed to delete message %s: %s", record.message_id, response,
+            )
+
+        self.session.add(record)
+        self.session.commit()
+
     @no_sql_log
     def collect_garbage(self) -> None:
         now = int(datetime.now().timestamp())
@@ -125,24 +145,7 @@ class GarbageCollector(Thread):
             logger.debug("Collected %s", record_ids)
 
         for record in records:
-            logger.debug(
-                "Deleting message %s from chat %s", record.message_id, record.chat_id
-            )
-
-            response = self.client.delete_message(record.chat_id, record.message_id)
-
-            if response.ok:
-                record.deleted = True
-            else:
-                record.should_delete = False
-                record.deleted = False
-                record.delete_failed = True
-                logger.error(
-                    "Failed to delete message %s: %s", record.message_id, response,
-                )
-
-            self.session.add(record)
-            self.session.commit()
+            self._delete_record(record)
 
     def run(self) -> None:
         self.session = Session()
