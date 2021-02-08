@@ -59,6 +59,9 @@ class Bot:
                 logger.info("Exiting...")
                 return
 
+            if updates:
+                logger.debug("Got %s new update(-s)", len(updates))
+
             for update in updates:
                 logger.debug("Got new update: %s", update)
                 if "message" in update:

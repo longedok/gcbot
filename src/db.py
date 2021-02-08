@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 
 from sqlalchemy import create_engine, Integer, Column, DateTime, Boolean
@@ -26,6 +28,8 @@ class MessageRecord(Base):
     date = Column(Integer, nullable=False)
     delete_after = Column(Integer)
     deleted = Column(Boolean, default=False)
+    delete_cancelled = Column(Boolean, default=False)
+    delete_failed = Column(Boolean, default=False)
     should_delete = Column(Boolean, default=False)
 
     def __str__(self) -> str:

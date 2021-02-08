@@ -35,7 +35,7 @@ def no_sql_log(func: F) -> F:
 
 class GarbageCollector(Thread):
     MAX_HOURS = 48  # maximum time during which a message can be deleted after 
-                    # being posted
+                    # it's posted
 
     def __init__(self, client: Client) -> None:
         super().__init__(daemon=True)
@@ -77,7 +77,7 @@ class GarbageCollector(Thread):
             MessageRecord.chat_id == chat_id,
             MessageRecord.deleted == False,
             MessageRecord.should_delete == True,
-        ).update({"should_delete": False})
+        ).update({"should_delete": False, "delete_cancelled": True})
 
         session.commit()
 
@@ -85,9 +85,12 @@ class GarbageCollector(Thread):
 
     def add_message(self, message: Message) -> None:
         logger.debug("Adding message %s to the grabage collector", message.message_id)
+
         settings = self._get_settings(message.chat_id)
-        now = int(datetime.now().timestamp())
-        delete_after = now + settings.gc_ttl if settings.gc_enabled else None
+        delete_after = None
+        if settings.gc_enabled:
+            delete_after = message.date + settings.gc_ttl
+
         record = MessageRecord(
             chat_id=message.chat_id,
             message_id=message.message_id,
@@ -124,8 +127,21 @@ class GarbageCollector(Thread):
             logger.debug(
                 "Deleting message %s from chat %s", record.message_id, record.chat_id
             )
-            self.client.delete_message(record.chat_id, record.message_id)
-            record.deleted = True
+
+            response = self.client.delete_message(record.chat_id, record.message_id)
+
+            if response.ok:
+                record.deleted = True
+            else:
+                record.should_delete = False
+                record.deleted = False
+                record.delete_failed = True
+                logger.error(
+                    "Failed to delete message %s from chat %s",
+                    record.message_id,
+                    record.chat_id,
+                )
+
             self.session.add(record)
             self.session.commit()
 
@@ -158,6 +174,18 @@ class GarbageCollector(Thread):
             .count()
         )
 
+    def count_cancelled(self, chat_id: int) -> int:
+        return (
+            session.query(MessageRecord)
+            .filter(
+                MessageRecord.chat_id == chat_id,
+                MessageRecord.date > self.unreachable_date,
+                MessageRecord.deleted == False,
+                MessageRecord.delete_cancelled == True,
+            )
+            .count()
+        )
+
     def status(self, chat_id: int) -> dict[str, Any]:
         settings = self._get_settings(chat_id)
         return {
@@ -165,5 +193,6 @@ class GarbageCollector(Thread):
             "gc_ttl": settings.gc_ttl,
             "gc_pending_count": self.count_pending(chat_id),
             "gc_unreachable_count": self.count_unreachable(chat_id),
+            "gc_cancelled_count": self.count_cancelled(chat_id),
         }
 

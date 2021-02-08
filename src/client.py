@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING, cast
 import logging
 import os
+from dataclasses import dataclass, field
 
 import requests
 from requests.exceptions import Timeout
+
+if TYPE_CHECKING:
+    from requests import Response
 
 logger = logging.getLogger(__name__)
 
@@ -13,98 +17,141 @@ TOKEN = os.environ["TOKEN"]
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 
+@dataclass
+class APIResponse:
+    data: dict
+    text: str | None
+    status: int
+    response: Response | None = field(repr=False, default=None)
+    timeout: bool = field(default=False)
+
+    @property
+    def ok(self) -> bool:
+        if self.data and self.data.get("ok"):
+            return True
+        return False
+
+    def get_result(self) -> dict | list | None:
+        if self.data:
+            return self.data.get("result")
+        return None
+
+    @classmethod
+    def from_response(cls, response: Response) -> APIResponse:
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+            logger.error("Invalid json in API response: %s", response.text)
+
+        if not (200 <= response.status_code < 300):
+            logger.error(
+                "Got non-2xx response: %s %s", response.status_code, response.text,
+            )
+
+        return cls(data, response.text, response.status_code, response=response)
+
+    @classmethod
+    def from_timeout(cls) -> APIResponse:
+        return cls({}, None, 0, timeout=True)
+
+    def raise_for_status(self) -> None:
+        if self.response:
+            self.response.raise_for_status()
+
+
 class Client:
     POLL_INTERVAL = 60
+    DEFAULT_TIMEOUT = 5
 
     def __init__(self, last_update_id: int | None = None) -> None:
         self.last_update_id = last_update_id
         self.headers = {"Content-Type": "application/json"}
 
-    def _post(self, url: str, data: dict) -> None:
-        response = requests.post(url, json=data, headers=self.headers)
+    def _prepare_params(self, request_params: dict) -> dict:
+        headers = {}
+        headers.update(self.headers)
+        headers.update(request_params.pop("headers", {}))
 
-        if response.status_code == 200:
-            logger.debug("POST response: %s", response.text)
-        else:
-            logger.error(
-                "Got non-200 response: %s %s", response.status_code, response.text
-            )
+        params = {
+            "headers": headers,
+            "timeout": self.DEFAULT_TIMEOUT,
+        }
+        params.update(request_params)
+
+        return params
+
+    def _post(self, url: str, data: dict, **request_params: Any) -> APIResponse:
+        params = self._prepare_params(request_params)
+
+        try:
+            response = requests.post(url, json=data, **params)
+        except Timeout:
+            return APIResponse.from_timeout()
+
+        return APIResponse.from_response(response)
 
     def _get(
         self,
         url: str,
         params: dict[str, Any],
-        silent: bool = True,
         **request_params: Any,
-    ) -> dict:
-        response = requests.get(
-            url,
-            params=params,
-            headers=self.headers,
-            **request_params,
-        )
-
-        if not silent:
-            response.raise_for_status()
-
-        if response.status_code != 200:
-            logger.error(
-                "Got non-200 response: %s %s", response.status_code, response.text,
-            )
-            return {}  # TODO: raise an exception
+    ) -> APIResponse:
+        full_request_params = self._prepare_params(request_params)
 
         try:
-            data = response.json()
-        except ValueError:
-            logger.error("Got invalid json %s", response.text)
-            return {}  # TODO: raise an exception
+            response = requests.get(url, params=params, **full_request_params)
+        except Timeout:
+            return APIResponse.from_timeout()
 
-        return data
+        return APIResponse.from_response(response)
 
     @property
     def offset(self) -> int | None:
         return self.last_update_id + 1 if self.last_update_id else None
 
     def get_updates(self) -> list[dict]:
-        try:
-            data = self._get(
-                f"{BASE_URL}/getUpdates",
-                params={
-                    "timeout": self.POLL_INTERVAL,
-                    "offset": self.offset,
-                },
-                timeout=self.POLL_INTERVAL + 5,
-                silent=False  # don't fail silently to avoid generating a lot of 
-                              # requests in the polling loop
-            )
-        except Timeout:
-            logger.error("getUpdates request timed out")
-            return []  # TODO: maybe raise an exception
+        response = self._get(
+            f"{BASE_URL}/getUpdates",
+            params={
+                "timeout": self.POLL_INTERVAL,
+                "offset": self.offset,
+            },
+            timeout=self.POLL_INTERVAL + 5,
+        )
 
-        if not data["ok"]:
-            logger.error("getUpdates got non-ok response: %s", data)
+        # don't fail silently to avoid generating lots of requests in the polling loop
+        response.raise_for_status()
+
+        if not response.ok:
+            logger.error("getUpdates got non-ok response: %s", response)
             return []  # TODO: raise an exception
 
-        if updates := data.get("result", []):
+        if updates := (response.get_result() or []):
             last_update = updates[-1]
             self.last_update_id = last_update["update_id"]
 
-        return updates
+        return cast(list, updates)
 
-    def post_message(self, chat_id: int, text: str, parse_mode: str = "HTML") -> None:
+    def post_message(
+        self,
+        chat_id: int,
+        text: str,
+        parse_mode: str = "HTML"
+    ) -> APIResponse:
         body = {
             "chat_id": chat_id,
             "text": text,
             "parse_mode": parse_mode,
         }
 
-        self._post(f"{BASE_URL}/sendMessage", body)
+        return self._post(f"{BASE_URL}/sendMessage", body)
 
-    def delete_message(self, chat_id: int, message_id: int) -> None:
+    def delete_message(self, chat_id: int, message_id: int) -> APIResponse:
         body = {
             "chat_id": chat_id,
             "message_id": message_id,
         }
 
-        self._post(f"{BASE_URL}/deleteMessage", body)
+        return self._post(f"{BASE_URL}/deleteMessage", body)
 
