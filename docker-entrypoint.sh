@@ -4,5 +4,5 @@ set -e
 
 . /venv/bin/activate
 
-exec python3 main.py
+exec python3 src/main.py
 
