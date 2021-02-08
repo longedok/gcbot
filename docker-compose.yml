@@ -8,6 +8,8 @@ services:
             - .env
         init: true
         stop_signal: SIGINT
+        logging:
+                driver: gcplogs
     postgres:
         image: postgres:13.1-alpine
         environment:
