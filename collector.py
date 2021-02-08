@@ -64,7 +64,7 @@ class GarbageCollector(Thread):
         session.commit()
 
     def disable(self, chat_id: int) -> None:
-        logger.debug("Enabling garbage collector for chat %s", chat_id)
+        logger.debug("Disabling garbage collector for chat %s", chat_id)
         settings = self._get_settings(chat_id)
         settings.gc_enabled = False
         session.add(settings)
