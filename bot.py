@@ -84,7 +84,7 @@ class Bot:
         }
 
     def _reply(self, chat_id: int, text: str) -> None:
-        logger.debug("Replying to chat %s: %s", chat_id, repr(text))
+        logger.debug("Replying to chat %s: %r", chat_id, text)
         self.client.post_message(chat_id, text)
 
     def dispatch_command(self, command: Command) -> None:
