@@ -78,19 +78,6 @@ class Bot:
 
         self.collector.add_message(message)
 
-    def _get_uptime(self) -> timedelta:
-        return datetime.now() - self.start_at
-
-    def status(self) -> dict[str, Any]:
-        uptime = self._get_uptime()
-        return {
-            "bot_uptime": format_interval(uptime),
-        }
-
-    def _reply(self, chat_id: int, text: str) -> None:
-        logger.debug("Replying to chat %s: %r", chat_id, text)
-        self.client.post_message(chat_id, text)
-
     def dispatch_command(self, command: Command) -> None:
         if command.username and command.username != self.USERNAME:
             logger.debug(
@@ -115,6 +102,10 @@ class Bot:
             except ValidationError as exc:
                 if exc.message:
                     self._reply(command.chat_id, exc.message)
+
+    def _reply(self, chat_id: int, text: str) -> None:
+        logger.debug("Replying to chat %s: %r", chat_id, text)
+        self.client.post_message(chat_id, text)
 
     def process_gc(self, command: Command) -> None:
         if command.params_clean:
@@ -161,6 +152,14 @@ class Bot:
     def process_help(self, command: Command) -> None:
         self._reply(command.chat_id, HELP)
 
+    def _get_uptime(self) -> timedelta:
+        return datetime.now() - self.start_at
+
+    def status(self) -> dict[str, Any]:
+        uptime = self._get_uptime()
+        return {
+            "bot_uptime": format_interval(uptime),
+        }
 
 def _format_status(status: dict[str, Any]) -> str:
     return json.dumps(status, indent=4)
