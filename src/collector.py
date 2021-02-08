@@ -138,9 +138,7 @@ class GarbageCollector(Thread):
                 record.deleted = False
                 record.delete_failed = True
                 logger.error(
-                    "Failed to delete message %s from chat %s",
-                    record.message_id,
-                    record.chat_id,
+                    "Failed to delete message %s: %s", record.message_id, response,
                 )
 
             self.session.add(record)
