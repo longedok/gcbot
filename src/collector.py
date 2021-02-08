@@ -8,6 +8,7 @@ from functools import wraps, cache
 from threading import Thread
 
 from db import Session, Settings, MessageRecord, session
+from utils import format_interval
 
 if TYPE_CHECKING:
     from client import Client
@@ -186,13 +187,34 @@ class GarbageCollector(Thread):
             .count()
         )
 
+    def next_delete_in(self, chat_id: int) -> timedelta | None:
+        next_record = (
+            session.query(MessageRecord)
+            .filter(
+                MessageRecord.chat_id == chat_id,
+                MessageRecord.date > self.unreachable_date,
+                MessageRecord.deleted == False,
+                MessageRecord.should_delete == True,
+            )
+            .order_by(MessageRecord.delete_after)
+            .first()
+        )
+
+        if not next_record:
+            return None
+
+        return datetime.utcfromtimestamp(next_record.delete_after) - datetime.utcnow()
+
     def status(self, chat_id: int) -> dict[str, Any]:
         settings = self._get_settings(chat_id)
+        next_delete_in = self.next_delete_in(chat_id)
+        next_delete_str = format_interval(next_delete_in) if next_delete_in else "N/A"
         return {
             "gc_enabled": settings.gc_enabled,
             "gc_ttl": settings.gc_ttl,
             "gc_pending_count": self.count_pending(chat_id),
             "gc_unreachable_count": self.count_unreachable(chat_id),
             "gc_cancelled_count": self.count_cancelled(chat_id),
+            "gc_next_delete_in": next_delete_str
         }
 

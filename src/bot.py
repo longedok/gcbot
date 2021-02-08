@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from entities import Message, ValidationError
+from utils import format_interval
 
 if TYPE_CHECKING:
     from datetime import datetime, timedelta
@@ -83,7 +84,7 @@ class Bot:
     def status(self) -> dict[str, Any]:
         uptime = self._get_uptime()
         return {
-            "bot_uptime": _format_uptime(uptime),
+            "bot_uptime": format_interval(uptime),
         }
 
     def _reply(self, chat_id: int, text: str) -> None:
@@ -163,10 +164,4 @@ class Bot:
 
 def _format_status(status: dict[str, Any]) -> str:
     return json.dumps(status, indent=4)
-
-
-def _format_uptime(uptime: timedelta) -> str:
-    uptime_str = str(uptime)
-    time_str, _, _ = uptime_str.partition(".")
-    return time_str
 

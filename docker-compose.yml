@@ -10,6 +10,7 @@ services:
         stop_signal: SIGINT
         logging:
                 driver: gcplogs
+        restart: on-failure
     postgres:
         image: postgres:13.1-alpine
         environment:
