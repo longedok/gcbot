@@ -48,7 +48,7 @@ class GCCommand(Command):
 
 @dataclass
 class Message:
-    text: str | None
+    text: str | None = field(repr=False)
     message_id: int
     chat_id: int
     date: int
