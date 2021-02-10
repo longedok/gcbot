@@ -19,7 +19,7 @@ BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 @dataclass
 class APIResponse:
-    data: dict
+    data: dict = field(repr=False)
     text: str | None
     status: int
     response: Response | None = field(repr=False, default=None)
@@ -89,7 +89,9 @@ class Client:
         except Timeout:
             return APIResponse.from_timeout()
 
-        return APIResponse.from_response(response)
+        api_response = APIResponse.from_response(response)
+        logger.debug("POST response: %s", api_response)
+        return api_response
 
     def _get(
         self,
@@ -137,13 +139,15 @@ class Client:
         self,
         chat_id: int,
         text: str,
-        parse_mode: str = "HTML"
+        parse_mode: str = "HTML",
+        **extra_params: Any,
     ) -> APIResponse:
         body = {
             "chat_id": chat_id,
             "text": text,
             "parse_mode": parse_mode,
         }
+        body.update(extra_params)
 
         return self._post(f"{BASE_URL}/sendMessage", body)
 

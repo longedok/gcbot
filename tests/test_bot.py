@@ -84,13 +84,9 @@ class TestBot:
     def test_gc(self, collector, bot):
         new_message(bot, "/gc")
 
-        response = (
-            f"Garbage collector enabled - automatically removing all new messages "
-            f"after 86400 seconds."
-        )
+        response = f"Please choose an expiration time for new messages"
 
         assert get_response(bot.client) == (CHAT_ID, response)
-        assert collector.enable.call_args.args == (CHAT_ID, 86400)
 
     def test_gc_params(self, collector, bot):
         new_message(bot, "/gc 15")

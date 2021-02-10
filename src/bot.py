@@ -23,7 +23,7 @@ This bot allows you to set an expiration time for all new messages in a group ch
 
 Supported commands:
 
-/gc <i>ttl</i> - Enable automatic removal of messages after <i>ttl</i> seconds, e.g. <code>/gc 3600</code> to remove new messages after 1 hour. Default <i>ttl</i> is 86400 seconds (1 day).
+/gc <i>ttl</i> - Enable automatic removal of messages after <i>ttl</i> seconds, e.g. <code>/gc 3600</code> to remove new messages after 1 hour. If the argument is not provided, default choices will be shown.
 /gcoff - Disable automatic removal of messages.
 /cancel - Cancel removal of all pending messages.
 /status - Get current status.
@@ -43,6 +43,7 @@ class Bot:
         "ping",
         "github",
         "help",
+        "noop",
     ]
     DEFAULT_TTL = 86400
 
@@ -61,7 +62,7 @@ class Bot:
                 return
 
             if updates:
-                logger.debug("Got %s new update(-s)", len(updates))
+                logger.debug("Got %s new update(s)", len(updates))
 
             for update in updates:
                 logger.debug("Got new update: %s", update)
@@ -89,7 +90,7 @@ class Bot:
 
         if command.command_str not in self.COMMANDS:
             self._reply(
-                command.chat_id, f"Unrecognized command: {command.command_str}"
+                command, f"Unrecognized command: {command.command_str}"
             )
             return
 
@@ -101,56 +102,110 @@ class Bot:
                 handler(command)
             except ValidationError as exc:
                 if exc.message:
-                    self._reply(command.chat_id, exc.message)
+                    self._reply(command, exc.message)
 
-    def _reply(self, chat_id: int, text: str) -> None:
+    def _reply(self, command: Command, text: str, **kwargs: Any) -> None:
+        chat_id = command.message.chat_id
+        reply_to = command.message.message_id
+
         logger.debug("Replying to chat %s: %r", chat_id, text)
-        self.client.post_message(chat_id, text)
+
+        self.client.post_message(
+            chat_id, text, reply_to_message_id=reply_to, **kwargs,
+        )
+
+    def _get_gc_keyboard(self) -> dict[str, Any]:
+        buttons = [
+            [
+                {"text": "/gc 30 - 30 seconds"},
+                {"text": "/gc 300 - 5 minutes"},
+            ],
+            [
+                {"text": "/gc 1800 - 30 minutes"},
+                {"text": "/gc 21600 - 6 hours"},
+            ],
+            [
+                {"text": "/gc 86400 - 1 day"},
+                {"text": "/gc 144000 - 40 hours"},
+            ],
+            [
+                {"text": "/gcoff - disable GC"},
+                {"text": "/noop - cancel"}
+            ]
+        ]
+
+        return {
+            "keyboard": buttons,
+            "one_time_keyboard": True,
+            "selective": True,
+        }
+
+    def _get_remove_keyboard(self) -> dict[str, Any]:
+        return {
+            "remove_keyboard": True,
+            "selective": True,
+        }
 
     def process_gc(self, command: Command) -> None:
-        if command.params_clean:
-            ttl = command.params_clean[0]
-        else:
-            ttl = self.DEFAULT_TTL
+        if not command.params_clean:
+            self._reply(
+                command,
+                "Please choose an expiration time for new messages",
+                reply_markup=self._get_gc_keyboard(),
+            )
+            return
+
+        ttl = command.params_clean[0]
 
         self.collector.enable(command.chat_id, ttl)
         logger.debug("GC enabled")
 
         self._reply(
-            command.chat_id,
+            command,
             f"Garbage collector enabled - automatically removing all new messages "
-            f"after {ttl} seconds."
+            f"after {ttl} seconds.",
+            reply_markup=self._get_remove_keyboard(),
         )
 
     def process_gcoff(self, command: Command) -> None:
         self.collector.disable(command.chat_id)
         logger.debug("GC disabled")
         self._reply(
-            command.chat_id,
+            command,
             "Garbage collector disabled - "
-            "new messages won't be removed automatically."
+            "new messages won't be removed automatically.",
+            reply_markup=self._get_remove_keyboard(),
         )
 
     def process_cancel(self, command: Command) -> None:
         cancelled = self.collector.cancel(command.chat_id)
         self._reply(
-            command.chat_id, f"Cancelled removal of {cancelled} pending messages."
+            command, f"Cancelled removal of {cancelled} pending messages."
         )
 
     def process_status(self, command: Command) -> None:
         status = self.collector.status(command.chat_id)
         status.update(self.status())
         status_str = _format_status(status)
-        self._reply(command.chat_id, f"Status: {status_str}")
+        self._reply(command, f"Status: {status_str}")
 
     def process_ping(self, command: Command) -> None:
-        self._reply(command.chat_id, f"pong")
+        self._reply(command, f"pong")
 
     def process_github(self, command: Command) -> None:
-        self._reply(command.chat_id, f"https://github.com/longedok/gcbot")
+        self._reply(
+            command, f"https://github.com/longedok/gcbot", disable_web_page_preview=True
+        )
 
     def process_help(self, command: Command) -> None:
-        self._reply(command.chat_id, HELP)
+        self._reply(command, HELP)
+
+    def process_noop(self, command: Command) -> None:
+        self._reply(
+            command,
+            "Ok, no settings changed.",
+            reply_markup=self._get_remove_keyboard(),
+        )
 
     def _get_uptime(self) -> timedelta:
         return datetime.now() - self.start_at
@@ -160,6 +215,7 @@ class Bot:
         return {
             "bot_uptime": format_interval(uptime),
         }
+
 
 def _format_status(status: dict[str, Any]) -> str:
     return json.dumps(status, indent=4)
