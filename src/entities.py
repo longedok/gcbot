@@ -46,6 +46,24 @@ class GCCommand(Command):
         self.params_clean.append(ttl)
 
 
+class RetryCommand(Command):
+    def clean_params(self) -> None:
+        if not self.params:
+            return
+
+        try:
+            max_attempts = int(self.params[0])
+            if not (1 < max_attempts <= 1000):
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValidationError(
+                "Please provide a valid integer between 1 and 1000 for the "
+                "<i>max_attempts</i> parameter."
+            )
+
+        self.params_clean.append(max_attempts)
+
+
 @dataclass
 class Message:
     text: str | None = field(repr=False)
@@ -56,6 +74,7 @@ class Message:
 
     COMMAND_CLASS: ClassVar[dict[str, Type[Command]]] = {
         "gc": GCCommand,
+        "retry": RetryCommand,
     }
 
     @classmethod

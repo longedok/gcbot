@@ -6,8 +6,9 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, TypeVar, Callable, Any, cast
 from functools import wraps, cache
 from threading import Thread
+from queue import Queue, Empty
 
-from db import Session, Settings, MessageRecord, session
+from db import Session, Settings, MessageRecord, session as global_session
 from utils import format_interval
 
 if TYPE_CHECKING:
@@ -41,17 +42,18 @@ class GarbageCollector(Thread):
     def __init__(self, client: Client) -> None:
         super().__init__(daemon=True)
         self.client = client
+        self.retries_queue = Queue()
 
     @cache
     def _get_settings(self, chat_id: int) -> Settings:
-        settings = session.query(Settings).filter(
+        settings = global_session.query(Settings).filter(
             Settings.chat_id == chat_id,
         ).first()
 
         if not settings:
             settings = Settings(chat_id=chat_id)
-            session.add(settings)
-            session.commit()
+            global_session.add(settings)
+            global_session.commit()
 
         return settings
 
@@ -62,25 +64,25 @@ class GarbageCollector(Thread):
         settings = self._get_settings(chat_id)
         settings.gc_enabled = True
         settings.gc_ttl = ttl
-        session.add(settings)
-        session.commit()
+        global_session.add(settings)
+        global_session.commit()
 
     def disable(self, chat_id: int) -> None:
         logger.debug("Disabling garbage collector for chat %s", chat_id)
         settings = self._get_settings(chat_id)
         settings.gc_enabled = False
-        session.add(settings)
-        session.commit()
+        global_session.add(settings)
+        global_session.commit()
 
     def cancel(self, chat_id: int) -> int:
         logger.debug("Cancelling removal of pending messages in chat %s", chat_id)
-        cancelled = session.query(MessageRecord).filter(
+        cancelled = global_session.query(MessageRecord).filter(
             MessageRecord.chat_id == chat_id,
             MessageRecord.deleted == False,
             MessageRecord.should_delete == True,
         ).update({"should_delete": False, "delete_cancelled": True})
 
-        session.commit()
+        global_session.commit()
 
         return cancelled
 
@@ -99,8 +101,19 @@ class GarbageCollector(Thread):
             delete_after=delete_after,
             should_delete=settings.gc_enabled,
         )
-        session.add(record)
-        session.commit()
+        global_session.add(record)
+        global_session.commit()
+
+    def run(self) -> None:
+        self.thread_session = Session()
+        while True:
+            self.collect_garbage()
+            try:
+                retry_params = self.retries_queue.get(timeout=1)
+            except Empty:
+                continue
+            chat_id, max_attempts = retry_params
+            self._run_retry(chat_id, max_attempts)
 
     @property
     def unreachable_date(self) -> int:
@@ -114,6 +127,7 @@ class GarbageCollector(Thread):
 
         response = self.client.delete_message(record.chat_id, record.message_id)
 
+        record.delete_attempt += 1
         if response.ok:
             record.deleted = True
         else:
@@ -124,14 +138,14 @@ class GarbageCollector(Thread):
                 "Failed to delete message %s: %s", record.message_id, response,
             )
 
-        self.session.add(record)
-        self.session.commit()
+        self.thread_session.add(record)
+        self.thread_session.commit()
 
     @no_sql_log
     def collect_garbage(self) -> None:
         now = int(datetime.now().timestamp())
         records = list(
-            self.session
+            self.thread_session
             .query(MessageRecord)
             .filter(
                 MessageRecord.delete_after <= now,
@@ -147,15 +161,34 @@ class GarbageCollector(Thread):
         for record in records:
             self._delete_record(record)
 
-    def run(self) -> None:
-        self.session = Session()
-        while True:
-            self.collect_garbage()
-            time.sleep(1)
+    def retry(self, chat_id: int, max_attempts: int | None = None) -> None:
+        # Not running retry process directly in order to not block bot's polling loop.
+        # Instead, use a queue to execute retries in the collector's thread.
+        self.retries_queue.put((chat_id, max_attempts))
+
+    def _run_retry(self, chat_id: int, max_attempts: int | None = None) -> None:
+        logger.debug("Re-trying to delete failed messages for chat %s", chat_id)
+
+        failed = list(
+            self._get_failed(
+                chat_id, max_attempts=max_attempts, session=self.thread_session,
+            )
+        )
+
+        deleted_count, total = 0, len(failed)
+        for record in failed:
+            self._delete_record(record)
+            if record.deleted:
+                deleted_count += 1
+
+        self.client.post_message(
+            chat_id,
+            f"Deleted {deleted_count} message(s) out of {total} after re-trying."
+        )
 
     def count_pending(self, chat_id: int) -> int:
         return (
-            session.query(MessageRecord)
+            global_session.query(MessageRecord)
             .filter(
                 MessageRecord.chat_id == chat_id,
                 MessageRecord.date > self.unreachable_date,
@@ -167,7 +200,7 @@ class GarbageCollector(Thread):
 
     def count_unreachable(self, chat_id: int) -> int:
         return (
-            session.query(MessageRecord)
+            global_session.query(MessageRecord)
             .filter(
                 MessageRecord.chat_id == chat_id,
                 MessageRecord.date <= self.unreachable_date,
@@ -178,7 +211,7 @@ class GarbageCollector(Thread):
 
     def count_cancelled(self, chat_id: int) -> int:
         return (
-            session.query(MessageRecord)
+            global_session.query(MessageRecord)
             .filter(
                 MessageRecord.chat_id == chat_id,
                 MessageRecord.date > self.unreachable_date,
@@ -188,9 +221,19 @@ class GarbageCollector(Thread):
             .count()
         )
 
+    def count_deleted(self, chat_id: int) -> int:
+        return (
+            global_session.query(MessageRecord)
+            .filter(
+                MessageRecord.chat_id == chat_id,
+                MessageRecord.deleted == True,
+            )
+            .count()
+        )
+
     def next_delete_in(self, chat_id: int) -> timedelta | None:
         next_record = (
-            session.query(MessageRecord)
+            global_session.query(MessageRecord)
             .filter(
                 MessageRecord.chat_id == chat_id,
                 MessageRecord.date > self.unreachable_date,
@@ -206,6 +249,33 @@ class GarbageCollector(Thread):
 
         return datetime.utcfromtimestamp(next_record.delete_after) - datetime.utcnow()
 
+    def _get_failed(
+        self,
+        chat_id: int,
+        max_attempts: int | None = None,
+        session: Session | None = None,
+    ) -> int:
+        if not session:
+            session = global_session
+
+        query = (
+            session.query(MessageRecord)
+            .filter(
+                MessageRecord.chat_id == chat_id,
+                MessageRecord.date > self.unreachable_date,
+                MessageRecord.deleted == False,
+                MessageRecord.delete_failed == True,
+            )
+        )
+
+        if max_attempts is not None:
+            query = query.filter(MessageRecord.delete_attempt <= max_attempts)
+
+        return query
+
+    def count_failed(self, chat_id: int, max_attempts: int | None = None) -> int:
+        return self._get_failed(chat_id, max_attempts).count()
+
     def status(self, chat_id: int) -> dict[str, Any]:
         settings = self._get_settings(chat_id)
         next_delete_in = self.next_delete_in(chat_id)
@@ -216,6 +286,8 @@ class GarbageCollector(Thread):
             "gc_pending_count": self.count_pending(chat_id),
             "gc_unreachable_count": self.count_unreachable(chat_id),
             "gc_cancelled_count": self.count_cancelled(chat_id),
-            "gc_next_delete_in": next_delete_str
+            "gc_failed_count": self.count_failed(chat_id),
+            "gc_deleted_count": self.count_deleted(chat_id),
+            "gc_next_delete_in": next_delete_str,
         }
 

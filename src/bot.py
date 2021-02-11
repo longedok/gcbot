@@ -23,9 +23,10 @@ This bot allows you to set an expiration time for all new messages in a group ch
 
 Supported commands:
 
-/gc <i>ttl</i> - Enable automatic removal of messages after <i>ttl</i> seconds, e.g. <code>/gc 3600</code> to remove new messages after 1 hour. If the argument is not provided, default choices will be shown.
+/gc <i>ttl</i> - Enable automatic removal of messages after <i>ttl</i> seconds, e.g. <code>/gc 3600</code> to remove new messages after 1 hour. If the argument is not provided, default time intervals will be presented.
 /gcoff - Disable automatic removal of messages.
 /cancel - Cancel removal of all pending messages.
+/retry <i>max_attempts</i> - Try to delete messages that failed to be deleted for some reason. Messages that were already re-tried more than <i>max_attempts</i> times won't be re-tried.
 /status - Get current status.
 /github - Link to the bot's source code.
 /ping - Sends "pong" in response.
@@ -39,6 +40,7 @@ class Bot:
         "gc",
         "gcoff",
         "cancel",
+        "retry",
         "status",
         "ping",
         "github",
@@ -182,6 +184,19 @@ class Bot:
         self._reply(
             command, f"Cancelled removal of {cancelled} pending messages."
         )
+
+    def process_retry(self, command: Command) -> None:
+        max_attempts = next(iter(command.params_clean), None)
+        count_failed = self.collector.count_failed(command.chat_id, max_attempts)
+
+        if not count_failed:
+            self._reply(command, "No failed messages found, not re-trying.")
+            return
+
+        self._reply(command, f"Attempting to delete {count_failed} failed message(s).")
+
+        self.client.send_chat_action(command.chat_id, "typing")
+        self.collector.retry(command.chat_id, max_attempts)
 
     def process_status(self, command: Command) -> None:
         status = self.collector.status(command.chat_id)

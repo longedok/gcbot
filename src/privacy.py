@@ -28,7 +28,6 @@ def _redact(data: dict, parent: str | None = None) -> None:
         path = (f"{parent}." if parent else "") + k
         if isinstance(v, dict):
             _redact(v, path)
-
         if path in REDACTED_FIELDS:
             data[k] = MASK
 

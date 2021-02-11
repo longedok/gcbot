@@ -159,3 +159,11 @@ class Client:
 
         return self._post(f"{BASE_URL}/deleteMessage", body)
 
+    def send_chat_action(self, chat_id: int, action: str) -> APIResponse:
+        body = {
+            "chat_id": chat_id,
+            "action": action,
+        }
+
+        return self._post(f"{BASE_URL}/sendChatAction", body)
+

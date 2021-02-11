@@ -131,6 +131,38 @@ class TestBot:
 
         assert get_response(bot.client) == (CHAT_ID, response)
         assert collector.cancel.call_args.args == (CHAT_ID,)
+        assert bot.collector.retry.call_count == 0
+
+    def test_retry(self, bot):
+        bot.collector.count_failed = Mock(return_value=5)
+        new_message(bot, "/retry")
+        response = "Attempting to delete 5 failed message(s)."
+
+        assert get_response(bot.client) == (CHAT_ID, response)
+        assert bot.collector.retry.call_args.args == (CHAT_ID, None)
+        assert bot.client.send_chat_action.call_args.args == (CHAT_ID, "typing")
+
+    def test_retry_no_failed(self, bot):
+        bot.collector.count_failed = Mock(return_value=0)
+        new_message(bot, "/retry")
+        response = "No failed messages found, not re-trying."
+        assert get_response(bot.client) == (CHAT_ID, response)
+
+    @pytest.mark.parametrize("message", [
+        "/retry abcd",
+        "/retry -15",
+        "/retry 2.34",
+        "/retry 0",
+        "/retry 1001",
+        "/retry qwefno oenf wqoiefn wqefoin",
+    ])
+    def test_retry_param_validation(self, bot, message):
+        new_message(bot, message)
+        response = (
+            "Please provide a valid integer between 1 and 1000 for the "
+            "<i>max_attempts</i> parameter."
+        )
+        assert get_response(bot.client) == (CHAT_ID, response)
 
     def test_status(self, bot):
         new_message(bot, "/status")
