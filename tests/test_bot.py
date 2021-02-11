@@ -142,6 +142,15 @@ class TestBot:
         assert bot.collector.retry.call_args.args == (CHAT_ID, None)
         assert bot.client.send_chat_action.call_args.args == (CHAT_ID, "typing")
 
+    def test_retry_param(self, bot):
+        bot.collector.count_failed = Mock(return_value=5)
+        new_message(bot, "/retry 1")
+        response = "Attempting to delete 5 failed message(s)."
+
+        assert get_response(bot.client) == (CHAT_ID, response)
+        assert bot.collector.retry.call_args.args == (CHAT_ID, 1)
+        assert bot.client.send_chat_action.call_args.args == (CHAT_ID, "typing")
+
     def test_retry_no_failed(self, bot):
         bot.collector.count_failed = Mock(return_value=0)
         new_message(bot, "/retry")

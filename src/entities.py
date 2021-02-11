@@ -53,7 +53,7 @@ class RetryCommand(Command):
 
         try:
             max_attempts = int(self.params[0])
-            if not (1 < max_attempts <= 1000):
+            if not (1 <= max_attempts <= 1000):
                 raise ValueError
         except (TypeError, ValueError):
             raise ValidationError(
