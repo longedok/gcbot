@@ -13,7 +13,7 @@ REDACTED_FIELDS = [
     "message.text",
 ]
 MASK = "*" * 3
-TOKEN_RE = re.compile(r"/bot([:0-9a-zA-Z]{46})/")
+TOKEN_RE = re.compile(r"/bot([:0-9a-zA-Z_-]{46})/")
 
 
 def _redact_bot_token(message: str) -> str:
