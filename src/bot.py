@@ -19,14 +19,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 HELP = """
-This bot allows you to set an expiration time for all new messages in a group chat.
+This bot allows you to set an expiration time for all new messages in a group chat. It supports the following commands:
 
-Supported commands:
+<b>Removing messages</b>
+/gc [<i>time_interval</i>] - Enable automatic removal of messages after <i>time_interval</i>. E.g., the command <code>/gc 1h</code> will result in all new messages being removed when they become 1 hour old.
 
-/gc <i>ttl</i> - Enable automatic removal of messages after <i>ttl</i> seconds, e.g. <code>/gc 3600</code> to remove new messages after 1 hour. If the argument is not provided, default time intervals will be presented. The command also accepts time intervals such as "1h30m" ("2 days" max).
+The <i>time_interval</i> parameter accepts an integer value of seconds between 0 and 172800 or a string describing a time interval, such as "15 minutes" or "1h30m", up to the maximum value of "2 days". If the parameter is not provided, the default time intervals will be presented.
+
 /gcoff - Disable automatic removal of messages.
+
 /cancel - Cancel removal of all pending messages.
-/retry <i>max_attempts</i> - Try to delete messages that failed to be deleted for some reason. Messages that were already re-tried more than <i>max_attempts</i> times won't be re-tried.
+
+/retry [<i>max_attempts</i>] - Try to remove messages that failed to be removed automatically. If the <i>max_attempts</i> parameters is specified, messages that were already re-tried more than <i>max_attempts</i> times won't be re-tried.
+
+<b>Bot info</b>
 /status - Get current status.
 /github - Link to the bot's source code.
 /ping - Sends "pong" in response.
