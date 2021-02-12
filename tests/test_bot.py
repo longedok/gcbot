@@ -88,8 +88,14 @@ class TestBot:
 
         assert get_response(bot.client) == (CHAT_ID, response)
 
-    def test_gc_params(self, collector, bot):
-        new_message(bot, "/gc 15")
+    @pytest.mark.parametrize("message", [
+        "/gc 15",
+        "/gc 15s",
+        "/gc 15 seconds",
+        "/gc 0.25m",
+    ])
+    def test_gc_params(self, collector, bot, message):
+        new_message(bot, message)
 
         response = (
             f"Garbage collector enabled - automatically removing all new messages "
@@ -184,6 +190,12 @@ class TestBot:
     def test_help(self, bot):
         new_message(bot, "/help")
         assert get_response(bot.client) == (CHAT_ID, HELP)
+
+    def test_noop(self, bot):
+        new_message(bot, "/noop")
+        chat_id, text = get_response(bot.client)
+        assert chat_id == CHAT_ID
+        assert text.startswith("Aborting")
 
     def test_username_command(self, bot):
         bot.USERNAME = "gcservantbot"

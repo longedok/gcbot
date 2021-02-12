@@ -23,7 +23,7 @@ This bot allows you to set an expiration time for all new messages in a group ch
 
 Supported commands:
 
-/gc <i>ttl</i> - Enable automatic removal of messages after <i>ttl</i> seconds, e.g. <code>/gc 3600</code> to remove new messages after 1 hour. If the argument is not provided, default time intervals will be presented.
+/gc <i>ttl</i> - Enable automatic removal of messages after <i>ttl</i> seconds, e.g. <code>/gc 3600</code> to remove new messages after 1 hour. If the argument is not provided, default time intervals will be presented. The command also accepts time intervals such as "1h30m" ("2 days" max).
 /gcoff - Disable automatic removal of messages.
 /cancel - Cancel removal of all pending messages.
 /retry <i>max_attempts</i> - Try to delete messages that failed to be deleted for some reason. Messages that were already re-tried more than <i>max_attempts</i> times won't be re-tried.
@@ -119,16 +119,16 @@ class Bot:
     def _get_gc_keyboard(self) -> dict[str, Any]:
         buttons = [
             [
-                {"text": "/gc 30 - 30 seconds"},
-                {"text": "/gc 300 - 5 minutes"},
+                {"text": "/gc 30 seconds"},
+                {"text": "/gc 5 minutes"},
             ],
             [
-                {"text": "/gc 1800 - 30 minutes"},
-                {"text": "/gc 21600 - 6 hours"},
+                {"text": "/gc 30 minutes"},
+                {"text": "/gc 6 hours"},
             ],
             [
-                {"text": "/gc 86400 - 1 day"},
-                {"text": "/gc 144000 - 40 hours"},
+                {"text": "/gc 1 day"},
+                {"text": "/gc 1 day 16 hours"},
             ],
             [
                 {"text": "/gcoff - disable GC"},
@@ -218,7 +218,7 @@ class Bot:
     def process_noop(self, command: Command) -> None:
         self._reply(
             command,
-            "Ok, no settings changed.",
+            "Aborting, no settings changed.",
             reply_markup=self._get_remove_keyboard(),
         )
 

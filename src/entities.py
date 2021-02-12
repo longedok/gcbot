@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING, ClassVar, Type
 from dataclasses import dataclass, field
 
+import pytimeparse
+
 
 class ValidationError(Exception):
     def __init__(self, message: str | None) -> None:
@@ -32,15 +34,24 @@ class GCCommand(Command):
         if not self.params:
             return
 
+        ttl_str = " ".join(self.params)
+
         try:
-            ttl = int(self.params[0])
+            ttl = pytimeparse.parse(ttl_str)
+
+            if ttl:
+                ttl = int(ttl)
+            else:
+                ttl = int(ttl_str)
+
             if not (0 <= ttl <= 172800):
                 raise ValueError
         except (TypeError, ValueError):
             raise ValidationError(
                 "Please provide a \"time to live\" for messages as a valid "
-                "integer between 0 and 172800.\n"
-                "E.g. \"/gcon 3600\" to start removing new messages after one hour."
+                "integer between 0 and 172800 or a time string such as \"1h30m\" "
+                "(\"2 days\" max).\n"
+                "E.g. \"/gc 1h\" to start removing new messages after one hour."
             )
 
         self.params_clean.append(ttl)
