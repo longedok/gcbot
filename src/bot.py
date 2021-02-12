@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 HELP = """
 This bot allows you to set an expiration time for all new messages in a group chat. It supports the following commands:
 
-<b>Removing messages</b>
+<b>Bot control</b>
 /gc [<i>time_interval</i>] - Enable automatic removal of messages after <i>time_interval</i>. E.g., the command <code>/gc 1h</code> will result in all new messages being removed when they become 1 hour old.
 
 The <i>time_interval</i> parameter accepts an integer value of seconds between 0 and 172800 or a string describing a time interval, such as "15 minutes" or "1h30m", up to the maximum value of "2 days". If the parameter is not provided, the default time intervals will be presented.
@@ -53,7 +53,6 @@ class Bot:
         "help",
         "noop",
     ]
-    DEFAULT_TTL = 86400
 
     def __init__(self, client: Client, collector: GarbageCollector) -> None:
         self.client = client

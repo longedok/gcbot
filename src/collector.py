@@ -14,6 +14,8 @@ from utils import format_interval
 if TYPE_CHECKING:
     from client import Client
     from entities import Message
+    from sqlalchemy.orm import Query
+    from sqlalchemy.orm.session import Session as SessionType
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ class GarbageCollector(Thread):
     def __init__(self, client: Client) -> None:
         super().__init__(daemon=True)
         self.client = client
-        self.retries_queue = Queue()
+        self.retries_queue: Queue[tuple[int, int | None]] = Queue()
 
     @cache
     def _get_settings(self, chat_id: int) -> Settings:
@@ -253,9 +255,9 @@ class GarbageCollector(Thread):
         self,
         chat_id: int,
         max_attempts: int | None = None,
-        session: Session | None = None,
-    ) -> int:
-        if not session:
+        session: SessionType | None = None,
+    ) -> Query:
+        if session is None:
             session = global_session
 
         query = (
