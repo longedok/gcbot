@@ -4,9 +4,12 @@ import os
 import logging
 import json
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+import math
+import json
+from functools import cached_property
 
-from entities import Message, ValidationError
+from entities import Message, CallbackQuery, ValidationError
 from utils import format_interval
 
 if TYPE_CHECKING:
@@ -15,6 +18,7 @@ if TYPE_CHECKING:
     from client import Client
     from collector import GarbageCollector
     from entities import Command
+    from sqlalchemy.orm import Query
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,9 @@ The <i>time_interval</i> parameter accepts an integer value of seconds between 0
 
 /cancel - Cancel removal of all pending messages.
 
-/retry [<i>max_attempts</i>] - Try to remove messages that failed to be removed automatically. If the <i>max_attempts</i> parameters is specified, messages that were already re-tried more than <i>max_attempts</i> times won't be re-tried.
+/retry [<i>max_attempts</i>] - Try to remove messages that failed to be removed automatically. If the <i>max_attempts</i> parameter is specified, messages that were already re-tried more than <i>max_attempts</i> times won't be re-tried.
+
+/queue - Shows IDs of messages to be removed next.
 
 <b>Bot info</b>
 /status - Get current status.
@@ -40,6 +46,75 @@ The <i>time_interval</i> parameter accepts an integer value of seconds between 0
 """
 
 
+class MessageTable:
+    PAGE_SIZE = 10
+
+    def __init__(self, records: Query, page: int) -> None:
+        self.records = records
+        self.page = page
+
+    @cached_property
+    def total(self) -> int:
+        return self.records.count()
+
+    @cached_property
+    def num_pages(self) -> int:
+        return math.ceil(self.total / self.PAGE_SIZE)
+
+    def build(self) -> str:
+        offset = (self.page - 1) * self.PAGE_SIZE
+        records = self.records.offset(offset).limit(self.PAGE_SIZE)
+
+        table = f"Message IDs to be deleted next (<b>{self.total}</b> in total):\n\n"
+        rows = []
+        utc_now = datetime.utcnow()
+        for i, record in enumerate(records):
+            delete_in = format_interval(
+                datetime.utcfromtimestamp(record.delete_after) - utc_now
+            )
+            row_number = offset + i + 1
+            rows.append(f"{row_number}. <b>{record.message_id}</b> in {delete_in}")
+
+        table += "\n".join(rows)
+        table += (
+            f"\n\n[page <b>{self.page}</b> out of <b>{self.num_pages}</b>]"
+        )
+
+        return table
+
+    def get_empty_message(self) -> str:
+        return "No messages queued for removal."
+
+    def get_keyboard(self) -> list[list[dict]]:
+        keyboard: list[list[dict]] = [[]]
+
+        format_data = lambda page: json.dumps({"page": page, "type": "queue"})
+
+        if self.page > 1:
+            keyboard[0].append({
+                "text": "<< prev",
+                "callback_data": format_data(self.page - 1),
+            })
+
+        if self.page < self.num_pages:
+            keyboard[0].append({
+                "text": "next >>",
+                "callback_data": format_data(self.page + 1),
+            })
+
+        return keyboard
+
+    def get_reply_markup(self) -> dict:
+        if self.num_pages <= 1:
+            return {}
+
+        return {
+            "reply_markup": {
+                "inline_keyboard": self.get_keyboard(),
+            }
+        }
+
+
 class Bot:
     USERNAME = os.environ.get("BOT_USERNAME", "gcservantbot")
     COMMANDS = [
@@ -47,6 +122,7 @@ class Bot:
         "gcoff",
         "cancel",
         "retry",
+        "queue",
         "status",
         "ping",
         "github",
@@ -76,6 +152,9 @@ class Bot:
                 if "message" in update:
                     message = Message.from_json(update["message"])
                     self.process_message(message)
+                elif "callback_query" in update:
+                    callback = CallbackQuery.from_json(update["callback_query"])
+                    self.dispatch_callback(callback)
 
     def process_message(self, message: Message) -> None:
         logger.debug("Processing %s", message)
@@ -85,6 +164,18 @@ class Bot:
             return
 
         self.collector.add_message(message)
+
+    def dispatch_callback(self, callback: CallbackQuery) -> None:
+        logger.debug("Processing %s", callback)
+
+        callback_type = callback.data.get("type")
+        if callback_type is None:
+            logger.error("Received a CallbackQuery with wrong structure: %s", callback)
+            return
+
+        handler = getattr(self, f"process_callback_{callback_type}", None)
+        if handler and callable(handler):
+            handler(callback)
 
     def dispatch_command(self, command: Command) -> None:
         if command.username and command.username != self.USERNAME:
@@ -203,6 +294,40 @@ class Bot:
         self.client.send_chat_action(command.chat_id, "typing")
         self.collector.retry(command.chat_id, max_attempts)
 
+    def process_queue(self, command: Command) -> None:
+        records = self.collector.get_removal_queue(command.chat_id)
+        table = MessageTable(records, 1)
+        self._show_table(command, table)
+
+    def process_callback_queue(self, callback: CallbackQuery) -> None:
+        page = callback.data.get("page")
+        records = self.collector.get_removal_queue(callback.chat_id)
+        table = MessageTable(records, cast(int, page))
+        self._update_table(callback, table)
+
+    def _show_table(self, command: Command, table: MessageTable) -> None:
+        if not table.total:
+            self._reply(command, table.get_empty_message())
+            return
+
+        self._reply(command, table.build(), **table.get_reply_markup())
+
+    def _update_table(self, callback: CallbackQuery, table: MessageTable) -> None:
+        if table.total == 0:
+            text = table.get_empty_message()
+        else:
+            text = table.build()
+
+        self.client.edit_message_text(
+            callback.chat_id,
+            callback.message_id,
+            text,
+            parse_mode="HTML",
+            **table.get_reply_markup(),
+        )
+
+        self.client.answer_callback_query(callback.id)
+
     def process_status(self, command: Command) -> None:
         status = self.collector.status(command.chat_id)
         status.update(self.status())
@@ -214,7 +339,9 @@ class Bot:
 
     def process_github(self, command: Command) -> None:
         self._reply(
-            command, f"https://github.com/longedok/gcbot", disable_web_page_preview=True
+            command,
+            f"https://github.com/longedok/gcbot",
+            disable_web_page_preview=True,
         )
 
     def process_help(self, command: Command) -> None:

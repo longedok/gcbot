@@ -167,3 +167,24 @@ class Client:
 
         return self._post(f"{BASE_URL}/sendChatAction", body)
 
+    def edit_message_text(
+        self, chat_id: int, message_id: int, text: str, **extra_params: Any,
+    ) -> APIResponse:
+        body = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+        }
+        body.update(extra_params)
+
+        return self._post(f"{BASE_URL}/editMessageText", body)
+
+    def answer_callback_query(
+        self, callback_query_id: int, **extra_params: Any,
+    ) -> APIResponse:
+        body = {
+            "callback_query_id": callback_query_id,
+        }
+        body.update(extra_params)
+
+        return self._post(f"{BASE_URL}/answerCallbackQuery", body)

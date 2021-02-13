@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING, ClassVar, Type
 from dataclasses import dataclass, field
+import json
 
 import pytimeparse
 
@@ -114,4 +115,25 @@ class Message:
 
         cls = self.COMMAND_CLASS.get(command_str, Command)
         return cls(command_str, params, username, offset, self)
+
+
+@dataclass
+class CallbackQuery:
+    id: int
+    message_id: int
+    chat_id: int
+    data: dict
+
+    @classmethod
+    def from_json(cls, callback_json: dict) -> CallbackQuery:
+        callback_id = callback_json["id"]
+        message_id = callback_json["message"]["message_id"]
+        chat_id = callback_json["message"]["chat"]["id"]
+
+        try:
+            data = json.loads(callback_json["data"])
+        except (ValueError, TypeError):
+            data = {"raw": callback_json["data"]}
+
+        return cls(callback_id, message_id, chat_id, data)
 

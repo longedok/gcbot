@@ -1,5 +1,8 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, MagicMock
+import random
 import copy
+from functools import cached_property
+from datetime import datetime
 
 import pytest
 
@@ -62,10 +65,50 @@ def client():
 
 @pytest.fixture
 def collector():
-    mock = Mock()
+    mock = MagicMock()
     mock.status = Mock(return_value={})
     mock.cancel = Mock(return_value=5)
     return mock
+
+
+class FakeMessageRecord:
+    @cached_property
+    def message_id(self):
+        return random.randint(1000, 10000)
+
+    @cached_property
+    def delete_after(self):
+        return int(datetime.utcnow().timestamp()) + random.randint(100, 1000)
+
+
+class FakeQuery:
+    def __init__(self, records=None) -> None:
+        self.records = records if records is not None else []
+
+    def offset(self, *args):
+        return self
+
+    def limit(self, *args):
+        return self
+
+    def count(self):
+        return len(self.records)
+
+    def __iter__(self):
+        self.n = 0
+        return self
+
+    def __next__(self):
+        if self.n < len(self.records):
+            record = self.records[self.n]
+            self.n += 1
+            return record
+        else:
+            raise StopIteration
+
+    @classmethod
+    def populate(cls, n):
+        return cls([FakeMessageRecord() for _ in range(n)])
 
 
 class TestBot:
@@ -178,6 +221,24 @@ class TestBot:
             "<i>max_attempts</i> parameter."
         )
         assert get_response(bot.client) == (CHAT_ID, response)
+
+    def test_queue(self, bot):
+        bot.collector.get_removal_queue = Mock(return_value=FakeQuery.populate(10))
+        new_message(bot, "/queue")
+
+        chat_id, text = get_response(bot.client)
+
+        assert chat_id == CHAT_ID
+        assert "Message IDs to be deleted next" in text
+
+    def test_queue_empty(self, bot):
+        bot.collector.get_removal_queue = Mock(return_value=FakeQuery())
+        new_message(bot, "/queue")
+
+        chat_id, text = get_response(bot.client)
+
+        assert chat_id == CHAT_ID
+        assert "No messages queued for removal." in text
 
     def test_status(self, bot):
         new_message(bot, "/status")

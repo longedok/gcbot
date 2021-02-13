@@ -188,6 +188,20 @@ class GarbageCollector(Thread):
             f"Deleted {deleted_count} message(s) out of {total} after re-trying."
         )
 
+    def get_removal_queue(self, chat_id: int) -> Query:
+        records = (
+            global_session.query(MessageRecord)
+            .filter(
+                MessageRecord.chat_id == chat_id,
+                MessageRecord.date > self.unreachable_date,
+                MessageRecord.deleted == False,
+                MessageRecord.should_delete == True,
+            )
+            .order_by(MessageRecord.delete_after.asc())
+        )
+
+        return records
+
     def count_pending(self, chat_id: int) -> int:
         return (
             global_session.query(MessageRecord)
