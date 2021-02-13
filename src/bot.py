@@ -4,7 +4,7 @@ import os
 import logging
 import json
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, Iterable
 import math
 import json
 from functools import cached_property
@@ -15,10 +15,12 @@ from utils import format_interval
 if TYPE_CHECKING:
     from datetime import datetime, timedelta
 
+    from sqlalchemy.orm import Query
+
     from client import Client
     from collector import GarbageCollector
     from entities import Command
-    from sqlalchemy.orm import Query
+    from db import MessageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -62,19 +64,14 @@ class MessageTable:
         return math.ceil(self.total / self.PAGE_SIZE)
 
     def build(self) -> str:
+        if not self.total:
+            return self.get_empty_message()
+
         offset = (self.page - 1) * self.PAGE_SIZE
         records = self.records.offset(offset).limit(self.PAGE_SIZE)
 
-        table = f"Message IDs to be deleted next (<b>{self.total}</b> in total):\n\n"
-        rows = []
-        utc_now = datetime.utcnow()
-        for i, record in enumerate(records):
-            delete_in = format_interval(
-                datetime.utcfromtimestamp(record.delete_after) - utc_now
-            )
-            row_number = offset + i + 1
-            rows.append(f"{row_number}. <b>{record.message_id}</b> in {delete_in}")
-
+        table = self.get_title()
+        rows = self.get_rows(records, offset)
         table += "\n".join(rows)
         table += (
             f"\n\n[page <b>{self.page}</b> out of <b>{self.num_pages}</b>]"
@@ -82,10 +79,24 @@ class MessageTable:
 
         return table
 
+    def get_title(self) -> str:
+        return f"Message IDs to be deleted next (<b>{self.total}</b> in total):\n\n"
+
+    def get_rows(self, records: Iterable[MessageRecord], offset: int) -> list[str]:
+        rows = []
+        utc_now = datetime.utcnow()
+        for i, record in enumerate(records):
+            delete_in = format_interval(
+                datetime.utcfromtimestamp(record.delete_after or 0) - utc_now
+            )
+            row_number = offset + i + 1
+            rows.append(f"{row_number}. <b>{record.message_id}</b> in {delete_in}")
+        return rows
+
     def get_empty_message(self) -> str:
         return "No messages queued for removal."
 
-    def get_keyboard(self) -> list[list[dict]]:
+    def _get_keyboard(self) -> list[list[dict]]:
         keyboard: list[list[dict]] = [[]]
 
         format_data = lambda page: json.dumps({"page": page, "type": "queue"})
@@ -110,7 +121,7 @@ class MessageTable:
 
         return {
             "reply_markup": {
-                "inline_keyboard": self.get_keyboard(),
+                "inline_keyboard": self._get_keyboard(),
             }
         }
 
@@ -212,6 +223,27 @@ class Bot:
             chat_id, text, reply_to_message_id=reply_to, **kwargs,
         )
 
+    def process_gc(self, command: Command) -> None:
+        if not command.params_clean:
+            self._reply(
+                command,
+                "Please choose an expiration time for new messages",
+                reply_markup=self._get_gc_keyboard(),
+            )
+            return
+
+        ttl = command.params_clean[0]
+
+        self.collector.enable(command.chat_id, ttl)
+        logger.debug("GC enabled")
+
+        self._reply(
+            command,
+            f"Garbage collector enabled - automatically removing all new messages "
+            f"after {ttl} seconds.",
+            reply_markup=self._get_remove_keyboard(),
+        )
+
     def _get_gc_keyboard(self) -> dict[str, Any]:
         buttons = [
             [
@@ -243,27 +275,6 @@ class Bot:
             "remove_keyboard": True,
             "selective": True,
         }
-
-    def process_gc(self, command: Command) -> None:
-        if not command.params_clean:
-            self._reply(
-                command,
-                "Please choose an expiration time for new messages",
-                reply_markup=self._get_gc_keyboard(),
-            )
-            return
-
-        ttl = command.params_clean[0]
-
-        self.collector.enable(command.chat_id, ttl)
-        logger.debug("GC enabled")
-
-        self._reply(
-            command,
-            f"Garbage collector enabled - automatically removing all new messages "
-            f"after {ttl} seconds.",
-            reply_markup=self._get_remove_keyboard(),
-        )
 
     def process_gcoff(self, command: Command) -> None:
         self.collector.disable(command.chat_id)
@@ -297,31 +308,17 @@ class Bot:
     def process_queue(self, command: Command) -> None:
         records = self.collector.get_removal_queue(command.chat_id)
         table = MessageTable(records, 1)
-        self._show_table(command, table)
-
-    def process_callback_queue(self, callback: CallbackQuery) -> None:
-        page = callback.data.get("page")
-        records = self.collector.get_removal_queue(callback.chat_id)
-        table = MessageTable(records, cast(int, page))
-        self._update_table(callback, table)
-
-    def _show_table(self, command: Command, table: MessageTable) -> None:
-        if not table.total:
-            self._reply(command, table.get_empty_message())
-            return
-
         self._reply(command, table.build(), **table.get_reply_markup())
 
-    def _update_table(self, callback: CallbackQuery, table: MessageTable) -> None:
-        if table.total == 0:
-            text = table.get_empty_message()
-        else:
-            text = table.build()
+    def process_callback_queue(self, callback: CallbackQuery) -> None:
+        records = self.collector.get_removal_queue(callback.chat_id)
+        page = callback.data.get("page")
+        table = MessageTable(records, cast(int, page))
 
         self.client.edit_message_text(
             callback.chat_id,
             callback.message_id,
-            text,
+            table.build(),
             parse_mode="HTML",
             **table.get_reply_markup(),
         )
