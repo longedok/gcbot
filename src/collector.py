@@ -88,20 +88,25 @@ class GarbageCollector(Thread):
 
         return cancelled
 
-    def add_message(self, message: Message) -> None:
+    def add_message(self, message: Message, ttl: int | None = None) -> None:
         logger.debug("Adding message %s to the grabage collector", message.message_id)
 
-        settings = self._get_settings(message.chat_id)
-        delete_after = None
-        if settings.gc_enabled:
-            delete_after = message.date + settings.gc_ttl
+        delete_after, should_delete = None, False
+        if ttl is None:
+            settings = self._get_settings(message.chat_id)
+            if settings.gc_enabled:
+                delete_after = message.date + settings.gc_ttl
+                should_delete = True
+        else:
+            delete_after = message.date + ttl
+            should_delete = True
 
         record = MessageRecord(
             chat_id=message.chat_id,
             message_id=message.message_id,
             date=message.date,
             delete_after=delete_after,
-            should_delete=settings.gc_enabled,
+            should_delete=should_delete,
         )
         global_session.add(record)
         global_session.commit()

@@ -3,6 +3,7 @@ import random
 import copy
 from functools import cached_property
 from datetime import datetime
+import re
 
 import pytest
 
@@ -36,13 +37,23 @@ def make_message(text):
     body = copy.deepcopy(UPDATE)
     body["message"]["text"] = text
 
-    if text.startswith("/"):
-        command = text.split()[0]
-        body["message"]["entities"] = [{
-            "offset": 0,
-            "length": len(command),
-            "type": "bot_command",
-        }]
+    re_to_type = {
+        r"/\w*\b": "bot_command",
+        r"#\w*\b": "hashtag",
+    }
+
+    entities = []
+    for regexp, entity_type in re_to_type.items():
+        for match in re.finditer(regexp, text):
+            start, end = match.span()
+            entities.append({
+                "offset": start,
+                "length": end - start,
+                "type": entity_type,
+            })
+
+    if entities:
+        body["message"]["entities"] = entities
 
     return body
 
@@ -270,4 +281,19 @@ class TestBot:
         chat_id, text = get_response(bot.client)
         assert chat_id == CHAT_ID
         assert "unrecognized command" in text.lower()
+
+    def test_tags(self, bot):
+        new_message(bot, "Hi there #5m #10m #test")
+
+        assert bot.collector.add_message.call_args.args[1] == 5 * 60
+
+    @pytest.mark.parametrize("message", [
+        "Hi #whatsupdog",
+        "Hi #2days5s",
+        "Hi #2secodns",
+    ])
+    def test_invalid_tags(self, bot, message):
+        new_message(bot, message)
+
+        assert bot.collector.add_message.call_args.args[1] is None
 

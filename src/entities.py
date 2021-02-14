@@ -6,6 +6,8 @@ import json
 
 import pytimeparse
 
+from utils import valid_ttl
+
 
 class ValidationError(Exception):
     def __init__(self, message: str | None) -> None:
@@ -45,7 +47,7 @@ class GCCommand(Command):
             else:
                 ttl = int(ttl_str)
 
-            if not (0 <= ttl <= 172800):
+            if not valid_ttl(ttl):
                 raise ValueError
         except (TypeError, ValueError):
             raise ValidationError(
@@ -115,6 +117,17 @@ class Message:
 
         cls = self.COMMAND_CLASS.get(command_str, Command)
         return cls(command_str, params, username, offset, self)
+
+    def get_tags(self) -> list[str]:
+        hashtags = [e for e in self.entities if e["type"] == "hashtag"]
+        clean_tags = []
+
+        for entity in hashtags:
+            offset, length = entity["offset"], entity["length"]
+            tag_clean = self.text[offset + 1:offset + length].lower()
+            clean_tags.append(tag_clean)
+
+        return clean_tags
 
 
 @dataclass

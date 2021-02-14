@@ -11,3 +11,7 @@ def format_interval(interval: timedelta) -> str:
     time_str, _, _ = uptime_str.partition(".")
     return time_str
 
+
+def valid_ttl(ttl: int) -> bool:
+    return 0 <= ttl <= 172800
+

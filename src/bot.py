@@ -9,8 +9,10 @@ import math
 import json
 from functools import cached_property
 
+import pytimeparse
+
 from entities import Message, CallbackQuery, ValidationError
-from utils import format_interval
+from utils import format_interval, valid_ttl
 
 if TYPE_CHECKING:
     from datetime import datetime, timedelta
@@ -27,10 +29,10 @@ logger = logging.getLogger(__name__)
 HELP = """
 This bot allows you to set an expiration time for all new messages in a group chat. It supports the following commands:
 
-<b>Bot control</b>
+<b>Control commands</b>
 /gc [<i>time_interval</i>] - Enable automatic removal of messages after <i>time_interval</i>. E.g., the command <code>/gc 1h</code> will result in all new messages being removed when they become 1 hour old.
 
-The <i>time_interval</i> parameter accepts an integer value of seconds between 0 and 172800 or a string describing a time interval, such as "15 minutes" or "1h30m", up to the maximum value of "2 days". If the parameter is not provided, the default time intervals will be presented.
+The <i>time_interval</i> parameter accepts an integer value of seconds between 0 and 172800 or a string describing a time interval, such as "15 minutes" or "1h30m", up to the maximum value of "2 days". If the parameter is not provided, a UI with the default time intervals will be presented.
 
 /gcoff - Disable automatic removal of messages.
 
@@ -38,13 +40,17 @@ The <i>time_interval</i> parameter accepts an integer value of seconds between 0
 
 /retry [<i>max_attempts</i>] - Try to remove messages that failed to be removed automatically. If the <i>max_attempts</i> parameter is specified, messages that were already re-tried more than <i>max_attempts</i> times won't be re-tried.
 
+<b>Info commands</b>
 /queue - Shows IDs of messages to be removed next.
-
-<b>Bot info</b>
 /status - Get current status.
 /github - Link to the bot's source code.
 /ping - Sends "pong" in response.
 /help - Display help message.
+
+<b>Quick tags</b>
+You can also include a hashtag specifying a time interval inside the message's text, to override the global expiration time for a single message. <b>E.g.</b>: "Hi all #5m" - this message will be removed in 5 minutes, ignoring the global expiration time setting.
+
+The same restrictions apply to time interval in tags as with the global <i>time_interval</i> setting, but the bot will silently ignore invalid intervals in tags.
 """
 
 
@@ -174,7 +180,20 @@ class Bot:
             self.dispatch_command(command)
             return
 
+        if tags := message.get_tags():
+            self.process_tags(message, tags)
+            return
+
         self.collector.add_message(message)
+
+    def process_tags(self, message: Message, tags: list[str]) -> None:
+        tag = tags[0]
+        ttl = pytimeparse.parse(tag)
+        custom_ttl = None
+        if ttl and valid_ttl(ttl):
+            custom_ttl = int(ttl)
+
+        self.collector.add_message(message, custom_ttl)
 
     def dispatch_callback(self, callback: CallbackQuery) -> None:
         logger.debug("Processing %s", callback)
