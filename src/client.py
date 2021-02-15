@@ -188,3 +188,7 @@ class Client:
         body.update(extra_params)
 
         return self._post(f"{BASE_URL}/answerCallbackQuery", body)
+
+    def set_my_commands(self, commands: list[dict[str, str]]) -> APIResponse:
+        return self._post(f"{BASE_URL}/setMyCommands", {"commands": commands})
+

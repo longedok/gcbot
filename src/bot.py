@@ -11,7 +11,7 @@ from functools import cached_property
 
 import pytimeparse
 
-from entities import Message, CallbackQuery, ValidationError
+from entities import Message, CallbackQuery, ValidationError, CommandDescriptor
 from utils import format_interval, valid_ttl
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ The <i>time_interval</i> parameter accepts an integer value of seconds between 0
 /help - Display help message.
 
 <b>Quick tags</b>
-You can also include a hashtag specifying a time interval inside the message's text, to override the global expiration time for a single message. <b>E.g.</b>: "Hi all #5m" - this message will be removed in 5 minutes, ignoring the global expiration time setting.
+You can also include a hashtag specifying a time interval inside the message's text, to override the global expiration time for a single message. E.g.: "Hi all #5m" - this message will be removed in 5 minutes, ignoring the global expiration time setting.
 
 The same restrictions apply to time interval in tags as with the global <i>time_interval</i> setting, but the bot will silently ignore invalid intervals in tags.
 """
@@ -134,18 +134,6 @@ class MessageTable:
 
 class Bot:
     USERNAME = os.environ.get("BOT_USERNAME", "gcservantbot")
-    COMMANDS = [
-        "gc",
-        "gcoff",
-        "cancel",
-        "retry",
-        "queue",
-        "status",
-        "ping",
-        "github",
-        "help",
-        "noop",
-    ]
 
     def __init__(self, client: Client, collector: GarbageCollector) -> None:
         self.client = client
@@ -153,6 +141,14 @@ class Bot:
         self.start_at = datetime.now()
 
     def start(self) -> None:
+        self.set_my_commands()
+        self.run_polling_loop()
+
+    def set_my_commands(self) -> None:
+        logger.info("Setting bot's command list")
+        self.client.set_my_commands(CommandDescriptor.get_my_commands())
+
+    def run_polling_loop(self) -> None:
         logger.info("Starting the polling loop")
         while True:
             try:
@@ -216,7 +212,8 @@ class Bot:
             )
             return  # don't process commands that wasn't meant for us
 
-        if command.command_str not in self.COMMANDS:
+        command_descriptor = CommandDescriptor.get_by_command_str(command.command_str)
+        if not command_descriptor:
             self._reply(
                 command, f"Unrecognized command: {command.command_str}"
             )

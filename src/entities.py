@@ -79,6 +79,55 @@ class RetryCommand(Command):
 
 
 @dataclass
+class CommandDescriptor:
+    command_str: str
+    short_description: str
+    show_in_autocomplete: bool = True
+    command_class: Type[Command] = Command
+
+    @staticmethod
+    def get_by_command_str(command_str: str) -> CommandDescriptor | None:
+        return COMMAND_STR_TO_DESCRIPTOR.get(command_str)
+
+    @staticmethod
+    def get_my_commands() -> list[dict[str, str]]:
+        commands = []
+        for desc in COMMANDS:
+            if desc.show_in_autocomplete:
+                commands.append(desc.as_bot_command())
+        return commands
+
+    def as_bot_command(self) -> dict[str, str]:
+        return {
+            "command": self.command_str,
+            "description": self.short_description,
+        }
+
+
+COMMANDS = [
+    CommandDescriptor(
+        "gc", "Enable automatic removal of messages.", command_class=GCCommand,
+    ),
+    CommandDescriptor("gcoff", "Disable automatic removal of messages."),
+    CommandDescriptor("cancel", "Cancel removal of all pending messages."),
+    CommandDescriptor(
+        "retry", "Re-try failed deletions.", command_class=RetryCommand,
+    ),
+    CommandDescriptor("queue", "Shows the IDs of messages to be removed next."),
+    CommandDescriptor("status", "Get current status."),
+    CommandDescriptor("github", "Link to the bot's source code."),
+    CommandDescriptor("ping", "Sends \"pong\" in response."),
+    CommandDescriptor("help", "Display help message."),
+    CommandDescriptor(
+        "noop",
+        "Dummy command that clears a reply keyboard.",
+        show_in_autocomplete=False
+    ),
+]
+COMMAND_STR_TO_DESCRIPTOR = {desc.command_str: desc for desc in COMMANDS}
+
+
+@dataclass
 class Message:
     text: str | None = field(repr=False)
     message_id: int
@@ -115,7 +164,8 @@ class Message:
         params_str = self.text[offset + length + 1:]
         params = params_str.split() if params_str else []
 
-        cls = self.COMMAND_CLASS.get(command_str, Command)
+        desc = CommandDescriptor.get_by_command_str(command_str)
+        cls = desc.command_class if desc else Command
         return cls(command_str, params, username, offset, self)
 
     def get_tags(self) -> list[str]:
