@@ -13,8 +13,8 @@ def get_settings(chat_id: int) -> Settings:
 
     if not settings:
         settings = Settings(chat_id=chat_id)
-        global_session.add(settings)
-        global_session.commit()
+        session.add(settings)
+        session.commit()
 
     return settings
 
