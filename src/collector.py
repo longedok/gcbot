@@ -4,11 +4,12 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, TypeVar, Callable, Any, cast
-from functools import wraps, cache
+from functools import wraps
 from threading import Thread
 from queue import Queue, Empty
 
-from db import Session, Settings, MessageRecord, session as global_session
+from db import Session, MessageRecord, session as global_session
+from settings import get_settings
 from utils import format_interval
 
 if TYPE_CHECKING:
@@ -46,24 +47,11 @@ class GarbageCollector(Thread):
         self.client = client
         self.retries_queue: Queue[tuple[int, int | None]] = Queue()
 
-    @cache
-    def _get_settings(self, chat_id: int) -> Settings:
-        settings = global_session.query(Settings).filter(
-            Settings.chat_id == chat_id,
-        ).first()
-
-        if not settings:
-            settings = Settings(chat_id=chat_id)
-            global_session.add(settings)
-            global_session.commit()
-
-        return settings
-
     def enable(self, chat_id: int, ttl: int) -> None:
         logger.debug(
             "Enabling garbage collector for chat %s with ttl %ss", chat_id, ttl
         )
-        settings = self._get_settings(chat_id)
+        settings = get_settings(chat_id)
         settings.gc_enabled = True
         settings.gc_ttl = ttl
         global_session.add(settings)
@@ -71,7 +59,7 @@ class GarbageCollector(Thread):
 
     def disable(self, chat_id: int) -> None:
         logger.debug("Disabling garbage collector for chat %s", chat_id)
-        settings = self._get_settings(chat_id)
+        settings = get_settings(chat_id)
         settings.gc_enabled = False
         global_session.add(settings)
         global_session.commit()
@@ -93,7 +81,7 @@ class GarbageCollector(Thread):
 
         delete_after, should_delete = None, False
         if ttl is None:
-            settings = self._get_settings(message.chat_id)
+            settings = get_settings(message.chat_id)
             if settings.gc_enabled:
                 delete_after = message.date + settings.gc_ttl
                 should_delete = True
@@ -298,7 +286,7 @@ class GarbageCollector(Thread):
         return self._get_failed(chat_id, max_attempts).count()
 
     def status(self, chat_id: int) -> dict[str, Any]:
-        settings = self._get_settings(chat_id)
+        settings = get_settings(chat_id)
         next_delete_in = self.next_delete_in(chat_id)
         next_delete_str = format_interval(next_delete_in) if next_delete_in else "N/A"
         return {

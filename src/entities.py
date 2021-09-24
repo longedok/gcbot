@@ -3,10 +3,14 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING, ClassVar, Type
 from dataclasses import dataclass, field
 import json
+import logging
 
 import pytimeparse
 
 from utils import valid_ttl
+
+
+logger = logging.getLogger(__name__)
 
 
 class ValidationError(Exception):
@@ -32,29 +36,53 @@ class Command:
         return None
 
 
+def clean_ttl(params: list[str]) -> int:
+    logger.debug("TTL params: %s", params)
+    ttl_str = " ".join(params)
+    ttl = pytimeparse.parse(ttl_str)
+
+    if ttl:
+        ttl = int(ttl)
+    else:
+        ttl = int(ttl_str)
+
+    if not valid_ttl(ttl):
+        raise ValueError
+
+    return ttl
+
+
 class GCCommand(Command):
     def clean_params(self) -> None:
         if not self.params:
             return
 
-        ttl_str = " ".join(self.params)
-
         try:
-            ttl = pytimeparse.parse(ttl_str)
-
-            if ttl:
-                ttl = int(ttl)
-            else:
-                ttl = int(ttl_str)
-
-            if not valid_ttl(ttl):
-                raise ValueError
+            ttl = clean_ttl(self.params)
         except (TypeError, ValueError):
             raise ValidationError(
                 "Please provide a \"time to live\" for messages as a valid "
                 "integer between 0 and 172800 or a time string such as \"1h30m\" "
                 "(\"2 days\" max).\n"
                 "E.g. \"/gc 1h\" to start removing new messages after one hour."
+            )
+
+        self.params_clean.append(ttl)
+
+
+class FWDCommand(Command):
+    def clean_params(self) -> None:
+        if not self.params:
+            return
+
+        try:
+            ttl = clean_ttl(self.params)
+        except (TypeError, ValueError):
+            raise ValidationError(
+                "Please provide a \"time to live\" for forwarded messages as a valid "
+                "integer between 0 and 172800 or a time string such as \"1h30m\" "
+                "(\"2 days\" max).\n"
+                "E.g. \"/fwd 1h\" to start removing forwarded messages after one hour."
             )
 
         self.params_clean.append(ttl)
@@ -109,6 +137,11 @@ COMMANDS = [
         "gc", "Enable automatic removal of messages.", command_class=GCCommand,
     ),
     CommandDescriptor("gcoff", "Disable automatic removal of messages."),
+    CommandDescriptor(
+        "fwd",
+        "Enable automatic removal of forwards from channels.",
+        command_class=FWDCommand,
+    ),
     CommandDescriptor("cancel", "Cancel removal of all pending messages."),
     CommandDescriptor(
         "retry", "Re-try failed deletions.", command_class=RetryCommand,
@@ -134,6 +167,7 @@ class Message:
     chat_id: int
     date: int
     entities: list[dict]
+    forward_username: str | None
 
     COMMAND_CLASS: ClassVar[dict[str, Type[Command]]] = {
         "gc": GCCommand,
@@ -148,7 +182,12 @@ class Message:
         entities = message_json.get("entities", [])
         date = message_json["date"]
 
-        return cls(text, message_id, chat_id, date, entities)
+        if "forward_from_chat" in message_json:
+            forward_username = message_json["forward_from_chat"]["username"]
+        else:
+            forward_username = None
+
+        return cls(text, message_id, chat_id, date, entities, forward_username)
 
     def get_command(self) -> Command | None:
         commands = [e for e in self.entities if e["type"] == "bot_command"]

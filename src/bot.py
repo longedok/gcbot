@@ -13,6 +13,8 @@ import pytimeparse
 
 from entities import Message, CallbackQuery, ValidationError, CommandDescriptor
 from utils import format_interval, valid_ttl
+from settings import get_settings
+from db import session
 
 if TYPE_CHECKING:
     from datetime import timedelta
@@ -36,6 +38,8 @@ The <i>time_interval</i> parameter accepts an integer value of seconds between 0
 
 /gcoff - Disable automatic removal of messages.
 
+/fwd [<i>time_interval</i>] - Enable automatic removal of forwarded messages from <i>certain</i> channels. Use command <code>/fwd 0</code> to disable.
+
 /cancel - Cancel removal of all pending messages.
 
 /retry [<i>max_attempts</i>] - Try to remove messages that failed to be removed automatically. If the <i>max_attempts</i> parameter is specified, messages that were already re-tried more than <i>max_attempts</i> times won't be re-tried.
@@ -52,6 +56,11 @@ You can also include a hashtag specifying a time interval inside the message's t
 
 The same restrictions apply to time interval in tags as with the global <i>time_interval</i> setting, but the bot will silently ignore invalid intervals in tags.
 """
+
+
+FORWARD_USERNAMES_TO_DELETE = [
+    "tutby_official",
+]
 
 
 class Bot:
@@ -94,24 +103,42 @@ class Bot:
     def process_message(self, message: Message) -> None:
         logger.debug("Processing %s", message)
         command = message.get_command()
-        if command and command.offset == 0:
+        if command and command.offset == 0 and not message.forward_username:
             self.dispatch_command(command)
             return
 
-        if tags := message.get_tags():
-            self.process_tags(message, tags)
+        if self.process_forwards(message):
             return
+
+        if tags := message.get_tags():
+            if self.process_tags(message, tags):
+                return
 
         self.collector.add_message(message)
 
-    def process_tags(self, message: Message, tags: list[str]) -> None:
+    def process_tags(self, message: Message, tags: list[str]) -> bool:
         tag = tags[0]
         ttl = pytimeparse.parse(tag)
-        custom_ttl = None
         if ttl and valid_ttl(ttl):
-            custom_ttl = int(ttl)
+            self.collector.add_message(message, int(ttl))
+            return True
+        else:
+            return False
 
-        self.collector.add_message(message, custom_ttl)
+    def process_forwards(self, message: Message) -> bool:
+        settings = get_settings(message.chat_id)
+
+        if not settings.forwards_ttl:
+            return False
+
+        if message.forward_username in FORWARD_USERNAMES_TO_DELETE:
+            logger.debug(
+                "Found a forward message from the list of undesirable usernames"
+            )
+            self.collector.add_message(message, settings.forwards_ttl)
+            return True
+        else:
+            return False
 
     def dispatch_callback(self, callback: CallbackQuery) -> None:
         logger.debug("Processing %s", callback)
@@ -182,19 +209,68 @@ class Bot:
             reply_markup=self._get_remove_keyboard(),
         )
 
+    def process_fwd(self, command: Command) -> None:
+        if not command.params_clean:
+            self._reply(
+                command,
+                "Please choose an expiration time for forwarded messages",
+                reply_markup=self._get_fwd_keyboard(),
+            )
+            return
+
+        ttl = command.params_clean[0]
+
+        settings = get_settings(command.chat_id)
+        settings.forwards_ttl = ttl
+        session.add(settings)
+        session.commit()
+
+        logger.debug("Forwards removal enabled")
+
+        if ttl > 0:
+            self._reply(
+                command,
+                f"Automatic removal of forwarded messages enabled. Removing forwards "
+                f"after {ttl} seconds.",
+                reply_markup=self._get_remove_keyboard(),
+            )
+        else:
+            self._reply(
+                command,
+                f"Automatic removal of forwarded messages disabled.",
+                reply_markup=self._get_remove_keyboard(),
+            )
+
     def _get_gc_keyboard(self) -> dict[str, Any]:
-        buttons = [
-            [{"text": "/gc 30 seconds"}, {"text": "/gc 5 minutes"}],
-            [{"text": "/gc 30 minutes"}, {"text": "/gc 6 hours"}],
-            [{"text": "/gc 1 day"}, {"text": "/gc 1 day 16 hours"}],
+        buttons = self._get_ttl_buttons("gc")
+        buttons.append(
             [{"text": "/gcoff - disable GC"}, {"text": "/noop - cancel"}],
-        ]
+        )
 
         return {
             "keyboard": buttons,
             "one_time_keyboard": True,
             "selective": True,
         }
+
+    def _get_fwd_keyboard(self) -> dict[str, Any]:
+        buttons = self._get_ttl_buttons("fwd")
+        buttons.append(
+            [{"text": "/fwd 0"}, {"text": "/noop - cancel"}],
+        )
+
+        return {
+            "keyboard": buttons,
+            "one_time_keyboard": True,
+            "selective": True,
+        }
+
+    def _get_ttl_buttons(self, command: str) -> list[dict]:
+        return [
+            [{"text": f"/{command} 30 seconds"}, {"text": f"/{command} 5 minutes"}],
+            [{"text": f"/{command} 30 minutes"}, {"text": f"/{command} 6 hours"}],
+            [{"text": f"/{command} 1 day"}, {"text": f"/{command} 1 day 16 hours"}],
+        ]
 
     def _get_remove_keyboard(self) -> dict[str, Any]:
         return {

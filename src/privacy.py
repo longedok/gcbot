@@ -19,6 +19,7 @@ REDACTED_FIELDS = [
     "*.from.first_name",
     "*.from.last_name",
     "*.from.username",
+    "*.forward_from_chat.username",
     "*.text",
     "*.chat.title",
 ]

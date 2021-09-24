@@ -47,6 +47,7 @@ class Settings(Base):
     chat_id = Column(BigInteger, nullable=False)
     gc_enabled = Column(Boolean, default=False)
     gc_ttl = Column(Integer, default=0)
+    forwards_ttl = Column(Integer, default=0)
 
 
 def init_storage() -> None:
