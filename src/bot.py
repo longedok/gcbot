@@ -59,7 +59,7 @@ The same restrictions apply to time interval in tags as with the global <i>time_
 
 
 FORWARD_USERNAMES_TO_DELETE = [
-    "tutby_official",
+    "tutby_official", "mediazona_by",
 ]
 
 
