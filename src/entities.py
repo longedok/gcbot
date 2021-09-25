@@ -167,7 +167,7 @@ class Message:
     chat_id: int
     date: int
     entities: list[dict]
-    forward_username: str | None
+    forward_username: str | None = field(repr=False)
 
     COMMAND_CLASS: ClassVar[dict[str, Type[Command]]] = {
         "gc": GCCommand,
