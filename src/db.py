@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import create_engine, Integer, BigInteger, Column, DateTime, Boolean
-from sqlalchemy.orm import scoped_session, sessionmaker
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, create_engine
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import scoped_session, sessionmaker
 
 pg_user = os.environ["POSTGRES_USERNAME"]
 pg_pass = os.environ["POSTGRES_PASSWORD"]
@@ -52,4 +52,3 @@ class Settings(Base):
 
 def init_storage() -> None:
     Base.metadata.create_all(engine)
-

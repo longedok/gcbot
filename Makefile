@@ -29,3 +29,7 @@ deploy:
 check:
 	mypy .
 
+fix:
+	isort .
+	black .
+

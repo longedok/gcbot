@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING, cast
 import logging
 import os
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, cast
 
 import requests
 from requests.exceptions import Timeout
 
 if TYPE_CHECKING:
     from requests import Response
+
+    from entities import Message
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,9 @@ class APIResponse:
 
         if not (200 <= response.status_code < 300):
             logger.error(
-                "Got non-2xx response: %s %s", response.status_code, response.text,
+                "Got non-2xx response: %s %s",
+                response.status_code,
+                response.text,
             )
 
         return cls(data, response.text, response.status_code, response=response)
@@ -135,6 +139,16 @@ class Client:
 
         return cast(list, updates)
 
+    def reply(self, message: Message, text: str, **kwargs: Any) -> None:
+        logger.debug("Replying to chat %s: %r", message.chat.id, text)
+
+        self.post_message(
+            message.chat.id,
+            text,
+            reply_to_message_id=message.message_id,
+            **kwargs,
+        )
+
     def post_message(
         self,
         chat_id: int,
@@ -168,7 +182,11 @@ class Client:
         return self._post(f"{BASE_URL}/sendChatAction", body)
 
     def edit_message_text(
-        self, chat_id: int, message_id: int, text: str, **extra_params: Any,
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        **extra_params: Any,
     ) -> APIResponse:
         body = {
             "chat_id": chat_id,
@@ -180,7 +198,9 @@ class Client:
         return self._post(f"{BASE_URL}/editMessageText", body)
 
     def answer_callback_query(
-        self, callback_query_id: int, **extra_params: Any,
+        self,
+        callback_query_id: int,
+        **extra_params: Any,
     ) -> APIResponse:
         body = {
             "callback_query_id": callback_query_id,
@@ -191,4 +211,3 @@ class Client:
 
     def set_my_commands(self, commands: list[dict[str, str]]) -> APIResponse:
         return self._post(f"{BASE_URL}/setMyCommands", {"commands": commands})
-

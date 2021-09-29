@@ -1,7 +1,7 @@
 import pytest
 from requests.exceptions import Timeout
 
-from client import Client, BASE_URL
+from client import BASE_URL, Client
 
 CHAT_ID = -593555199
 
@@ -13,17 +13,17 @@ UPDATE = {
             "id": 427258479,
             "is_bot": False,
             "first_name": "Иван",
-            "username": "iivanov"
+            "username": "iivanov",
         },
         "chat": {
             "id": CHAT_ID,
             "title": "Bot Test (dev)",
             "type": "group",
-            "all_members_are_administrators": True
+            "all_members_are_administrators": True,
         },
         "date": 1612207828,
         "text": "Hello World!",
-    }
+    },
 }
 
 
@@ -33,10 +33,13 @@ class TestClient:
         return Client()
 
     def test_get_updates(self, client, requests_mock):
-        requests_mock.get(f"{BASE_URL}/getUpdates", json={
-            "ok": True,
-            "result": [UPDATE],
-        })
+        requests_mock.get(
+            f"{BASE_URL}/getUpdates",
+            json={
+                "ok": True,
+                "result": [UPDATE],
+            },
+        )
         updates = client.get_updates()
         assert updates == [UPDATE]
 
@@ -44,4 +47,3 @@ class TestClient:
         requests_mock.get(f"{BASE_URL}/getUpdates", exc=Timeout)
         updates = client.get_updates()
         assert updates == []
-

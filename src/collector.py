@@ -3,20 +3,22 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, TypeVar, Callable, Any, cast
 from functools import wraps
+from queue import Empty, Queue
 from threading import Thread
-from queue import Queue, Empty
+from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
 
-from db import Session, MessageRecord, session as global_session
+from db import MessageRecord, Session
+from db import session as global_session
 from settings import get_settings
-from utils import format_interval
+from utils.formatting import format_interval
 
 if TYPE_CHECKING:
-    from client import Client
-    from entities import Message
     from sqlalchemy.orm import Query
     from sqlalchemy.orm.session import Session as SessionType
+
+    from client import Client
+    from entities import Message
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 def no_sql_log(func: F) -> F:
     @wraps(func)
     def inner(*args, **kwargs):  # type: ignore
-        logger = logging.getLogger('sqlalchemy.engine')
+        logger = logging.getLogger("sqlalchemy.engine")
         level = logger.level
 
         logger.setLevel(logging.WARNING)
@@ -39,8 +41,8 @@ def no_sql_log(func: F) -> F:
 
 
 class GarbageCollector(Thread):
-    MAX_HOURS = 48  # maximum time during which a message can be deleted after 
-                    # it's posted
+    MAX_HOURS = 48  # maximum time during which a message can be deleted after
+    # it's posted
 
     def __init__(self, client: Client) -> None:
         super().__init__(daemon=True)
@@ -66,11 +68,15 @@ class GarbageCollector(Thread):
 
     def cancel(self, chat_id: int) -> int:
         logger.debug("Cancelling removal of pending messages in chat %s", chat_id)
-        cancelled = global_session.query(MessageRecord).filter(
-            MessageRecord.chat_id == chat_id,
-            MessageRecord.deleted == False,
-            MessageRecord.should_delete == True,
-        ).update({"should_delete": False, "delete_cancelled": True})
+        cancelled = (
+            global_session.query(MessageRecord)
+            .filter(
+                MessageRecord.chat_id == chat_id,
+                MessageRecord.deleted == False,
+                MessageRecord.should_delete == True,
+            )
+            .update({"should_delete": False, "delete_cancelled": True})
+        )
 
         global_session.commit()
 
@@ -81,7 +87,7 @@ class GarbageCollector(Thread):
 
         delete_after, should_delete = None, False
         if ttl is None:
-            settings = get_settings(message.chat_id)
+            settings = get_settings(message.chat.id)
             if settings.gc_enabled:
                 delete_after = message.date + settings.gc_ttl
                 should_delete = True
@@ -90,7 +96,7 @@ class GarbageCollector(Thread):
             should_delete = True
 
         record = MessageRecord(
-            chat_id=message.chat_id,
+            chat_id=message.chat.id,
             message_id=message.message_id,
             date=message.date,
             delete_after=delete_after,
@@ -130,7 +136,9 @@ class GarbageCollector(Thread):
             record.deleted = False
             record.delete_failed = True
             logger.error(
-                "Failed to delete message %s: %s", record.message_id, response,
+                "Failed to delete message %s: %s",
+                record.message_id,
+                response,
             )
 
         self.thread_session.add(record)
@@ -140,9 +148,7 @@ class GarbageCollector(Thread):
     def collect_garbage(self) -> None:
         now = int(datetime.now().timestamp())
         records = list(
-            self.thread_session
-            .query(MessageRecord)
-            .filter(
+            self.thread_session.query(MessageRecord).filter(
                 MessageRecord.delete_after <= now,
                 MessageRecord.deleted == False,
                 MessageRecord.date > self.unreachable_date,
@@ -166,7 +172,9 @@ class GarbageCollector(Thread):
 
         failed = list(
             self._get_failed(
-                chat_id, max_attempts=max_attempts, session=self.thread_session,
+                chat_id,
+                max_attempts=max_attempts,
+                session=self.thread_session,
             )
         )
 
@@ -178,7 +186,7 @@ class GarbageCollector(Thread):
 
         self.client.post_message(
             chat_id,
-            f"Deleted {deleted_count} message(s) out of {total} after re-trying."
+            f"Deleted {deleted_count} message(s) out of {total} after re-trying.",
         )
 
     def get_removal_queue(self, chat_id: int) -> Query:
@@ -267,14 +275,11 @@ class GarbageCollector(Thread):
         if session is None:
             session = global_session
 
-        query = (
-            session.query(MessageRecord)
-            .filter(
-                MessageRecord.chat_id == chat_id,
-                MessageRecord.date > self.unreachable_date,
-                MessageRecord.deleted == False,
-                MessageRecord.delete_failed == True,
-            )
+        query = session.query(MessageRecord).filter(
+            MessageRecord.chat_id == chat_id,
+            MessageRecord.date > self.unreachable_date,
+            MessageRecord.deleted == False,
+            MessageRecord.delete_failed == True,
         )
 
         if max_attempts is not None:
@@ -299,4 +304,3 @@ class GarbageCollector(Thread):
             "gc_deleted_count": self.count_deleted(chat_id),
             "gc_next_delete_in": next_delete_str,
         }
-
