@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import re
+from copy import deepcopy
 
 MASK = "*" * 3
 TOKEN_RE = re.compile(r"/bot([:0-9a-zA-Z_-]{46})/")
@@ -49,4 +49,3 @@ def redacted_dict_copy(data: dict) -> dict:
     dict_copy = deepcopy(data)
     _redact_dict(dict_copy)
     return dict_copy
-

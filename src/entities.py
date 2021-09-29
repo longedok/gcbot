@@ -1,21 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING, ClassVar, Type
-from dataclasses import dataclass, field
 import json
 import logging
+from dataclasses import dataclass, field
+from functools import cached_property
+from typing import TYPE_CHECKING, Any, ClassVar, Type
 
 import pytimeparse
 
-from utils import valid_ttl
-
-
 logger = logging.getLogger(__name__)
-
-
-class ValidationError(Exception):
-    def __init__(self, message: str | None) -> None:
-        self.message = message
 
 
 @dataclass
@@ -23,200 +16,122 @@ class Command:
     command_str: str
     params: list[str]
     username: str
-    offset: int
-    message: Message = field(repr=False)
+    entity: Entity
 
     params_clean: list[Any] = field(default_factory=list, init=False)
 
-    @property
-    def chat_id(self) -> int:
-        return self.message.chat_id
 
-    def clean_params(self) -> None:
-        return None
+@dataclass
+class Chat:
+    id: int
+    title: str = field(repr=False)
+    type: str
 
-
-def clean_ttl(params: list[str]) -> int:
-    logger.debug("TTL params: %s", params)
-    ttl_str = " ".join(params)
-    ttl = pytimeparse.parse(ttl_str)
-
-    if ttl:
-        ttl = int(ttl)
-    else:
-        ttl = int(ttl_str)
-
-    if not valid_ttl(ttl):
-        raise ValueError
-
-    return ttl
-
-
-class GCCommand(Command):
-    def clean_params(self) -> None:
-        if not self.params:
-            return
-
-        try:
-            ttl = clean_ttl(self.params)
-        except (TypeError, ValueError):
-            raise ValidationError(
-                "Please provide a \"time to live\" for messages as a valid "
-                "integer between 0 and 172800 or a time string such as \"1h30m\" "
-                "(\"2 days\" max).\n"
-                "E.g. \"/gc 1h\" to start removing new messages after one hour."
-            )
-
-        self.params_clean.append(ttl)
-
-
-class FWDCommand(Command):
-    def clean_params(self) -> None:
-        if not self.params:
-            return
-
-        try:
-            ttl = clean_ttl(self.params)
-        except (TypeError, ValueError):
-            raise ValidationError(
-                "Please provide a \"time to live\" for forwarded messages as a valid "
-                "integer between 0 and 172800 or a time string such as \"1h30m\" "
-                "(\"2 days\" max).\n"
-                "E.g. \"/fwd 1h\" to start removing forwarded messages after one hour."
-            )
-
-        self.params_clean.append(ttl)
-
-
-class RetryCommand(Command):
-    def clean_params(self) -> None:
-        if not self.params:
-            return
-
-        try:
-            max_attempts = int(self.params[0])
-            if not (1 <= max_attempts <= 1000):
-                raise ValueError
-        except (TypeError, ValueError):
-            raise ValidationError(
-                "Please provide a valid integer between 1 and 1000 for the "
-                "<i>max_attempts</i> parameter."
-            )
-
-        self.params_clean.append(max_attempts)
+    @classmethod
+    def from_json(cls, chat_json: dict) -> Chat:
+        chat_id = chat_json["id"]
+        title = chat_json["title"]
+        chat_type = chat_json["type"]
+        return cls(chat_id, title, chat_type)
 
 
 @dataclass
-class CommandDescriptor:
-    command_str: str
-    short_description: str
-    show_in_autocomplete: bool = True
-    command_class: Type[Command] = Command
+class ForwardFromChat:
+    id: int
+    title: str = field(repr=False)
+    username: str
+    type: str = field(repr=False)
 
-    @staticmethod
-    def get_by_command_str(command_str: str) -> CommandDescriptor | None:
-        return COMMAND_STR_TO_DESCRIPTOR.get(command_str)
-
-    @staticmethod
-    def get_my_commands() -> list[dict[str, str]]:
-        commands = []
-        for desc in COMMANDS:
-            if desc.show_in_autocomplete:
-                commands.append(desc.as_bot_command())
-        return commands
-
-    def as_bot_command(self) -> dict[str, str]:
-        return {
-            "command": self.command_str,
-            "description": self.short_description,
-        }
+    @classmethod
+    def from_json(cls, forwrad_from_chat_json: dict) -> ForwardFromChat:
+        chat_id = forwrad_from_chat_json["id"]
+        title = forwrad_from_chat_json["title"]
+        username = forwrad_from_chat_json["username"]
+        chat_type = forwrad_from_chat_json["type"]
+        return cls(chat_id, title, username, chat_type)
 
 
-COMMANDS = [
-    CommandDescriptor(
-        "gc", "Enable automatic removal of messages.", command_class=GCCommand,
-    ),
-    CommandDescriptor("gcoff", "Disable automatic removal of messages."),
-    CommandDescriptor(
-        "fwd",
-        "Enable automatic removal of forwards from channels.",
-        command_class=FWDCommand,
-    ),
-    CommandDescriptor("cancel", "Cancel removal of all pending messages."),
-    CommandDescriptor(
-        "retry", "Re-try failed deletions.", command_class=RetryCommand,
-    ),
-    CommandDescriptor("queue", "Shows the IDs of messages to be removed next."),
-    CommandDescriptor("status", "Get current status."),
-    CommandDescriptor("github", "Link to the bot's source code."),
-    CommandDescriptor("ping", "Sends \"pong\" in response."),
-    CommandDescriptor("help", "Display help message."),
-    CommandDescriptor(
-        "noop",
-        "Dummy command that clears a reply keyboard.",
-        show_in_autocomplete=False
-    ),
-]
-COMMAND_STR_TO_DESCRIPTOR = {desc.command_str: desc for desc in COMMANDS}
+@dataclass
+class Entity:
+    offset: int
+    length: int
+    type: str
+
+    @classmethod
+    def from_json(self, entity_json: dict) -> Entity:
+        offset = entity_json["offset"]
+        length = entity_json["length"]
+        type = entity_json["type"]
+        return Entity(offset, length, type)
 
 
 @dataclass
 class Message:
     text: str | None = field(repr=False)
     message_id: int
-    chat_id: int
+    chat: Chat
     date: int
-    entities: list[dict]
-    forward_username: str | None = field(repr=False)
-
-    COMMAND_CLASS: ClassVar[dict[str, Type[Command]]] = {
-        "gc": GCCommand,
-        "retry": RetryCommand,
-    }
+    entities: list[Entity]
+    forward_from_chat: ForwardFromChat | None
 
     @classmethod
     def from_json(cls, message_json: dict) -> Message:
         text = message_json.get("text")
         message_id = message_json["message_id"]
-        chat_id = message_json["chat"]["id"]
-        entities = message_json.get("entities", [])
+        chat = Chat.from_json(message_json["chat"])
         date = message_json["date"]
 
-        if "forward_from_chat" in message_json:
-            forward_username = message_json["forward_from_chat"]["username"]
+        entities_json = message_json.get("entities", [])
+        if entities_json:
+            entities = [Entity.from_json(entity) for entity in entities_json]
         else:
-            forward_username = None
+            entities = []
 
-        return cls(text, message_id, chat_id, date, entities, forward_username)
+        forward_from_chat = None
+        if "forward_from_chat" in message_json:
+            forward_from_chat = ForwardFromChat.from_json(
+                message_json["forward_from_chat"]
+            )
 
-    def get_command(self) -> Command | None:
-        commands = [e for e in self.entities if e["type"] == "bot_command"]
-        entity = next(iter(commands), None)
+        return cls(text, message_id, chat, date, entities, forward_from_chat)
 
-        if not entity or not self.text:
+    @cached_property
+    def command(self) -> Command | None:
+        entities = self.get_entities_by_type("bot_command")
+        entity = next(iter(entities), None)
+
+        if not entity:
             return None
 
-        offset, length = entity["offset"], entity["length"]
-        command_str = self.text[offset + 1:offset + length].lower()
+        assert self.text
+
+        command_str = self.get_entity_text(entity).lower()
         command_str, _, username = command_str.partition("@")
 
-        params_str = self.text[offset + length + 1:]
+        params_str = self.text[entity.offset + entity.length + 1 :]
         params = params_str.split() if params_str else []
 
-        desc = CommandDescriptor.get_by_command_str(command_str)
-        cls = desc.command_class if desc else Command
-        return cls(command_str, params, username, offset, self)
+        return Command(command_str, params, username, entity)
+
+    def get_entities_by_type(self, entity_type: str) -> list[Entity]:
+        return [e for e in self.entities if e.type == entity_type]
+
+    def get_entity_text(self, entity: Entity) -> str:
+        assert self.text
+
+        offset, length = entity.offset, entity.length
+        command_str = self.text[offset + 1 : offset + length].lower()
+        return self.text[offset + 1 : offset + length]
 
     def get_tags(self) -> list[str]:
-        hashtags = [e for e in self.entities if e["type"] == "hashtag"]
-        clean_tags = []
+        entities = self.get_entities_by_type("hashtag")
+        tags = []
 
-        for entity in hashtags:
-            offset, length = entity["offset"], entity["length"]
-            tag_clean = self.text[offset + 1:offset + length].lower()
-            clean_tags.append(tag_clean)
+        for entity in entities:
+            tag = self.get_entity_text(entity).lower()
+            tags.append(tag)
 
-        return clean_tags
+        return tags
 
 
 @dataclass
@@ -238,4 +153,3 @@ class CallbackQuery:
             data = {"raw": callback_json["data"]}
 
         return cls(callback_id, message_id, chat_id, data)
-

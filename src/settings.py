@@ -7,9 +7,13 @@ from db import Settings, session
 
 @cache
 def get_settings(chat_id: int) -> Settings:
-    settings = session.query(Settings).filter(
-        Settings.chat_id == chat_id,
-    ).first()
+    settings = (
+        session.query(Settings)
+        .filter(
+            Settings.chat_id == chat_id,
+        )
+        .first()
+    )
 
     if not settings:
         settings = Settings(chat_id=chat_id)
@@ -17,4 +21,3 @@ def get_settings(chat_id: int) -> Settings:
         session.commit()
 
     return settings
-
