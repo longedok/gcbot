@@ -10,6 +10,7 @@ from .formatting import format_interval
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Query
+
     from db import MessageRecord
 
 

@@ -10,8 +10,6 @@ from utils.validation import valid_ttl
 def clean_ttl(params: list[str]) -> int:
     ttl_str = " ".join(params)
     ttl = pytimeparse.parse(ttl_str)
-    print("TTL", ttl)
-    print("TTL STR", ttl_str)
 
     if ttl:
         ttl = int(ttl)
@@ -31,7 +29,6 @@ class Validator:
 
 class GcValidator(Validator):
     def validate(self, command: Command) -> None:
-        print("COM", command)
         if not command.params:
             return
 

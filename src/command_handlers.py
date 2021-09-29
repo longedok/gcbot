@@ -16,8 +16,8 @@ from validators import FwdValidator, GcValidator, RetryValidator
 if TYPE_CHECKING:
     from bot_context import BotContext
     from collector import GarbageCollector
-    from validators import Validator
     from entities import Command
+    from validators import Validator
 
 
 logger = getLogger(__name__)
