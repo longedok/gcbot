@@ -38,15 +38,15 @@ class Chat:
 @dataclass
 class ForwardFromChat:
     id: int
-    title: str = field(repr=False)
-    username: str
+    title: str | None = field(repr=False)
+    username: str | None
     type: str = field(repr=False)
 
     @classmethod
     def from_json(cls, forwrad_from_chat_json: dict) -> ForwardFromChat:
         chat_id = forwrad_from_chat_json["id"]
-        title = forwrad_from_chat_json["title"]
-        username = forwrad_from_chat_json["username"]
+        title = forwrad_from_chat_json.get("title")
+        username = forwrad_from_chat_json.get("username")
         chat_type = forwrad_from_chat_json["type"]
         return cls(chat_id, title, username, chat_type)
 
